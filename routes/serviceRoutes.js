@@ -7,4 +7,3 @@ router.post('/inquiry', submitInquiry);
 router.get('/inquiries', protect, admin, getInquiries);
 
 module.exports = router;
-

@@ -1,4 +1,4 @@
-// Chapa payment gateway integration config
+// Chapa payment gateway integration config (Real API)
 const axios = require('axios');
 
 const chapaConfig = {

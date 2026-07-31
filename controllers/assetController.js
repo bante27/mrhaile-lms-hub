@@ -54,4 +54,3 @@ const createAsset = async (req, res) => {
 };
 
 module.exports = { getAssets, getAssetById, createAsset };
-
