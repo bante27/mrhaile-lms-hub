@@ -1,4 +1,6 @@
 const Asset = require('../models/Asset');
+const bunnyConfig = require('../config/bunny');
+const cloudinary = require('../config/cloudinary');
 
 // @desc Get all digital assets & stock footage
 // @route GET /api/assets
@@ -31,19 +33,52 @@ const getAssetById = async (req, res) => {
   }
 };
 
-// @desc Create asset (Admin)
+// @desc Create asset with Bunny Storage file upload & Cloudinary thumbnail (Admin)
 // @route POST /api/assets
 const createAsset = async (req, res) => {
   try {
-    const { title, description, category, fileUrl, thumbnail, isFree, price } = req.body;
+    const { title, description, category, isFree, price } = req.body;
+    let fileUrl = req.body.fileUrl || '';
+    let thumbnail = req.body.thumbnail || '';
+
+    if (req.files && Array.isArray(req.files)) {
+      // Handle digital asset file upload to Bunny Storage
+      const assetFile = req.files.find(f => f.fieldname === 'file' || f.fieldname === 'assetFile');
+      if (assetFile && assetFile.buffer) {
+        fileUrl = await bunnyConfig.uploadAssetFile(assetFile.originalname, assetFile.buffer);
+      }
+
+      // Handle thumbnail image upload to Cloudinary
+      const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
+      if (thumbnailFile && thumbnailFile.buffer) {
+        try {
+          const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              { folder: 'mrhaile_assets' },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result);
+              }
+            );
+            uploadStream.end(thumbnailFile.buffer);
+          });
+          if (uploadResult && uploadResult.secure_url) {
+            thumbnail = uploadResult.secure_url;
+          }
+        } catch (err) {
+          // Ignore or fallback
+        }
+      }
+    }
+
     const asset = new Asset({
       title,
       description,
       category,
       fileUrl,
       thumbnail,
-      isFree,
-      price
+      isFree: isFree === true || isFree === 'true',
+      price: Number(price) || 0
     });
 
     const createdAsset = await asset.save();
