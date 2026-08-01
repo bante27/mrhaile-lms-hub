@@ -28,4 +28,18 @@ const admin = (req, res, next) => {
   }
 };
 
-module.exports = { protect, admin };
+// 1. Email Credentials Check Middleware
+const checkEmailCredentials = (req, res, next) => {
+    const emailUser = process.env.MAIL_USERNAME || process.env.EMAIL_USER || process.env.NODEMAILER_EMAIL;
+    const emailPass = process.env.MAIL_PASSWORD || process.env.EMAIL_PASS || process.env.NODEMAILER_PASS;
+    
+    if (!emailUser || !emailPass) {
+        return res.status(500).json({ 
+            success: false, 
+            error: 'Email service credentials missing' 
+        });
+    }
+    next();
+};
+
+module.exports = { protect, admin, checkEmailCredentials };
