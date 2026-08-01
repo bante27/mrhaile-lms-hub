@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const lessonSchema = new mongoose.Schema({
   title: { type: String, required: true },
-  videoUrl: { type: String, required: true }, // Bunny CDN / Vimeo OTT URL
+  bunnyVideoId: { type: String, default: '' }, // Bunny Stream Video ID
   duration: { type: String },
   freePreview: { type: Boolean, default: false }
 });
