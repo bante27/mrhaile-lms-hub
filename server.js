@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
+const rateLimit = require('./middleware/rateLimitMiddleware');
 
 // Routes
 const authRoutes = require('./routes/authRoutes');
@@ -23,6 +24,14 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+// Rate limiting middleware
+const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
+const strictLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { message: 'Too many requests, please try again later.' } });
+
+app.use('/api/', apiLimiter);
+app.use('/api/auth', strictLimiter);
+app.use('/api/payments', strictLimiter);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);

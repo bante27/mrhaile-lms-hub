@@ -36,6 +36,13 @@ const initializePayment = async (req, res) => {
 
     const paymentResponse = await initializeChapaPayment(chapaData);
 
+    if (!paymentResponse || !paymentResponse.data || !paymentResponse.data.checkout_url) {
+      return res.status(400).json({ 
+        message: 'Invalid response from Chapa payment gateway. Please check your API keys or Test Mode settings.', 
+        paymentResponse 
+      });
+    }
+
     res.json({
       checkoutUrl: paymentResponse.data.checkout_url,
       tx_ref
@@ -52,7 +59,7 @@ const verifyPayment = async (req, res) => {
     const { tx_ref } = req.params;
     const verification = await verifyChapaPayment(tx_ref);
 
-    if (verification.status === 'success') {
+    if (verification && verification.status === 'success') {
       const order = await Order.findOne({ tx_ref }).populate('user course');
       if (order && order.status !== 'completed') {
         order.status = 'completed';
@@ -81,10 +88,33 @@ const verifyPayment = async (req, res) => {
       return res.json({ message: 'Payment verified successfully. Course unlocked and access link sent to email!', status: 'success' });
     }
 
-    res.status(400).json({ message: 'Payment verification failed', status: verification.status });
+    res.status(400).json({ message: 'Payment verification failed or pending', status: verification?.status || 'unknown' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-module.exports = { initializePayment, verifyPayment };
+// @desc Test email delivery directly in Postman
+// @route POST /api/payments/test-email
+const testEmailDelivery = async (req, res) => {
+  try {
+    const { email, courseTitle } = req.body;
+    const targetEmail = email || req.user.email;
+    const title = courseTitle || 'Advanced Video Editing Masterclass';
+    
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const courseWatchLink = `${frontendUrl}/courses/sample-id`;
+
+    await sendEmail({
+      email: targetEmail,
+      subject: `[Test] Access Your Course: ${title} - MrHaile.com`,
+      message: `Hello ${req.user.firstName || 'Student'},\n\nThis is a test verification email for "${title}"!\n\nYou can watch your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
+    });
+
+    res.json({ message: `Test email successfully sent to ${targetEmail}!` });
+  } catch (error) {
+    res.status(500).json({ message: 'Email sending failed: ' + error.message });
+  }
+};
+
+module.exports = { initializePayment, verifyPayment, testEmailDelivery };
