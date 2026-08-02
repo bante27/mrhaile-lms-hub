@@ -14,6 +14,8 @@ const paymentRoutes = require('./routes/paymentRoutes');
 const serviceRoutes = require('./routes/serviceRoutes');
 const portfolioRoutes = require('./routes/portfolioRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
+const contactRoutes = require('./routes/contactRoutes');
+const newsletterRoutes = require('./routes/newsletterRoutes');
 
 connectDB();
 
@@ -29,6 +31,8 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/services', serviceRoutes);
 app.use('/api/portfolio', portfolioRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/newsletter', newsletterRoutes);
 
 app.get('/', (req, res) => {
   res.send('MrHaile.com API is running...');
