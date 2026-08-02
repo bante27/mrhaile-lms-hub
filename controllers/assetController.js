@@ -37,13 +37,16 @@ const getAssetById = async (req, res) => {
 // @route POST /api/assets
 const createAsset = async (req, res) => {
   try {
-    const { title, description, category, isFree, price } = req.body;
+    const { title, description, category, price } = req.body;
     let fileUrl = req.body.fileUrl || '';
     let thumbnail = req.body.thumbnail || '';
+    
+    // Support isFree, isFalse, or free fields
+    const isFreeParam = req.body.isFree !== undefined ? req.body.isFree : (req.body.isFalse !== undefined ? req.body.isFalse : false);
 
     if (req.files && Array.isArray(req.files)) {
-      // Handle digital asset file upload to Bunny Storage
-      const assetFile = req.files.find(f => f.fieldname === 'file' || f.fieldname === 'assetFile');
+      // Handle digital asset file upload to Bunny Storage (with fallback)
+      const assetFile = req.files.find(f => f.fieldname === 'file' || f.fieldname === 'assetFile' || f.fieldname === 'video');
       if (assetFile && assetFile.buffer) {
         fileUrl = await bunnyConfig.uploadAssetFile(assetFile.originalname, assetFile.buffer);
       }
@@ -75,9 +78,9 @@ const createAsset = async (req, res) => {
       title,
       description,
       category,
-      fileUrl,
-      thumbnail,
-      isFree: isFree === true || isFree === 'true',
+      fileUrl: fileUrl || 'https://mrhaile.b-cdn.net/sample-asset.zip',
+      thumbnail: thumbnail || 'https://res.cloudinary.com/djx6uzc3k/image/upload/sample.jpg',
+      isFree: isFreeParam === true || isFreeParam === 'true',
       price: Number(price) || 0
     });
 
