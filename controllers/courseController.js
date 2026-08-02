@@ -1,41 +1,80 @@
 const Course = require('../models/Course');
 const User = require('../models/User');
+const Review = require('../models/Review');
 const bunnyConfig = require('../config/bunny');
 const cloudinary = require('../config/cloudinary');
 
-// Helper to attach playable videoUrl to lessons
-const formatCourseWithVideos = (course) => {
+// Helper to attach playable videoUrl (with Free Preview & Paid Lock/Pause logic) and exact dynamic stats
+const formatCourseWithStats = async (course, req) => {
   const courseObj = course.toObject ? course.toObject() : course;
-  if (courseObj.lessons && Array.isArray(courseObj.lessons)) {
-    courseObj.lessons = courseObj.lessons.map(lesson => ({
-      ...lesson,
-      videoUrl: lesson.bunnyVideoId && lesson.bunnyVideoId.trim() !== ''
-        ? `https://iframe.mediadelivery.net/embed/${bunnyConfig.libraryId}/${lesson.bunnyVideoId}` 
-        : ''
-    }));
+
+  let isEnrolled = false;
+  let isAdmin = false;
+
+  // Check if requesting user is logged in and enrolled or admin
+  if (req && req.user) {
+    try {
+      const user = await User.findById(req.user._id);
+      if (user) {
+        isAdmin = user.role === 'admin';
+        isEnrolled = user.enrolledCourses && user.enrolledCourses.map(id => id.toString()).includes(courseObj._id.toString());
+      }
+    } catch (e) {
+      // ignore user lookup error
+    }
   }
+
+  // Format lessons with Bunny video URL (Lock/Pause if paid and user not enrolled/admin)
+  if (courseObj.lessons && Array.isArray(courseObj.lessons)) {
+    courseObj.lessons = courseObj.lessons.map(lesson => {
+      const canAccess = lesson.freePreview || isEnrolled || isAdmin;
+      return {
+        ...lesson,
+        videoUrl: canAccess && lesson.bunnyVideoId && lesson.bunnyVideoId.trim() !== ''
+          ? `https://iframe.mediadelivery.net/embed/${bunnyConfig.libraryId}/${lesson.bunnyVideoId}` 
+          : '' // Locked / Paused for unpaid users
+      };
+    });
+  }
+
+  // Exact Enrolled Students Count from Database
+  const enrolledCount = await User.countDocuments({ enrolledCourses: courseObj._id });
+  courseObj.enrolledStudentsCount = enrolledCount;
+
+  // Exact Ratings & Reviews from Database
+  const reviews = await Review.find({ targetId: courseObj._id });
+  courseObj.numReviews = reviews.length;
+  
+  if (reviews.length > 0) {
+    const sum = reviews.reduce((acc, item) => acc + item.rating, 0);
+    courseObj.averageRating = Number((sum / reviews.length).toFixed(1));
+  } else {
+    courseObj.averageRating = 0.0;
+  }
+
   return courseObj;
 };
 
-// @desc Get all courses
+// @desc Get all courses with smart lock/pause access logic
 // @route GET /api/courses
 const getCourses = async (req, res) => {
   try {
     const courses = await Course.find({});
-    const formattedCourses = courses.map(c => formatCourseWithVideos(c));
+    const formattedCourses = await Promise.all(courses.map(c => formatCourseWithStats(c, req)));
     res.json(formattedCourses);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Get single course by ID
+// @desc Get single course by ID with smart lock/pause access logic
 // @route GET /api/courses/:id
 const getCourseById = async (req, res) => {
   try {
     const course = await Course.findById(req.params.id);
     if (course) {
-      res.json(formatCourseWithVideos(course));
+      const formatted = await formatCourseWithStats(course, req);
+      res.json(formatted);
     } else {
       res.status(404).json({ message: 'Course not found' });
     }
@@ -100,16 +139,12 @@ const createCourse = async (req, res) => {
 
       // Handle real video uploads for lessons sequentially from any attached video files
       const videoFiles = req.files.filter(f => f.fieldname !== 'thumbnail');
-      console.log(`[Course Create] Found ${videoFiles.length} video file(s) attached for ${lessons.length} lesson(s).`);
-
       for (let i = 0; i < lessons.length && i < videoFiles.length; i++) {
         const matchedFile = videoFiles[i];
         if (matchedFile && matchedFile.buffer) {
           try {
-            console.log(`[Course Create] Uploading video file "${matchedFile.originalname}" to Bunny.net for lesson ${i}: "${lessons[i].title}"...`);
             const bunnyVideoId = await bunnyConfig.uploadVideo(lessons[i].title, matchedFile.buffer);
             lessons[i].bunnyVideoId = bunnyVideoId;
-            console.log(`[Course Create] Successfully assigned Bunny Video ID ${bunnyVideoId} to lesson ${i}`);
           } catch (uploadErr) {
             console.error(`[Course Create] Bunny video upload failed for lesson ${i}:`, uploadErr.message);
           }
@@ -133,7 +168,8 @@ const createCourse = async (req, res) => {
     });
 
     const createdCourse = await course.save();
-    res.status(201).json(formatCourseWithVideos(createdCourse));
+    const formatted = await formatCourseWithStats(createdCourse, req);
+    res.status(201).json(formatted);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
