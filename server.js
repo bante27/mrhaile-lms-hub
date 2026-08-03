@@ -29,9 +29,7 @@ app.use(express.json());
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 const strictLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { message: 'Too many requests, please try again later.' } });
 
-app.use('/api/', apiLimiter);
-app.use('/api/auth', strictLimiter);
-app.use('/api/payments', strictLimiter);
+
 
 app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);

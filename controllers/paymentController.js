@@ -65,7 +65,7 @@ const verifyPayment = async (req, res) => {
         order.status = 'completed';
         await order.save();
 
-        // Enroll user in course
+        // Enroll user in course (adds course ID to enrolledCourses array)
         await User.findByIdAndUpdate(order.user._id, {
           $addToSet: { enrolledCourses: order.course._id }
         });
@@ -94,6 +94,48 @@ const verifyPayment = async (req, res) => {
   }
 };
 
+// @desc Simulate successful payment directly in Postman (Bypasses Chapa external redirect)
+// @route POST /api/payments/simulate-success
+const simulateSuccessfulPayment = async (req, res) => {
+  try {
+    const { tx_ref } = req.body;
+    if (!tx_ref) {
+      return res.status(400).json({ message: 'Please provide tx_ref in request body' });
+    }
+
+    const order = await Order.findOne({ tx_ref }).populate('user course');
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found with this tx_ref' });
+    }
+
+    // Force update order status and enroll user
+    order.status = 'completed';
+    await order.save();
+
+    await User.findByIdAndUpdate(order.user._id, {
+      $addToSet: { enrolledCourses: order.course._id }
+    });
+
+    // Send confirmation email with link
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const courseWatchLink = `${frontendUrl}/courses/${order.course._id}`;
+
+    await sendEmail({
+      email: order.user.email,
+      subject: `[Simulated] Access Your Course: ${order.course.title} - MrHaile.com`,
+      message: `Hello ${order.user.firstName || 'Student'},\n\nYour payment for "${order.course.title}" was successfully simulated!\n\nYou can watch your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
+    });
+
+    res.json({ 
+      message: 'Payment successfully simulated! User enrolled, order marked completed, and email sent.', 
+      courseWatchLink,
+      enrolledCourseId: order.course._id 
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc Test email delivery directly in Postman
 // @route POST /api/payments/test-email
 const testEmailDelivery = async (req, res) => {
@@ -117,4 +159,4 @@ const testEmailDelivery = async (req, res) => {
   }
 };
 
-module.exports = { initializePayment, verifyPayment, testEmailDelivery };
+module.exports = { initializePayment, verifyPayment, simulateSuccessfulPayment, testEmailDelivery };

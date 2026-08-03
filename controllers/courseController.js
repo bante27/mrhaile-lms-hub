@@ -198,7 +198,10 @@ const getLessonVideoToken = async (req, res) => {
       }
 
       const user = await User.findById(req.user._id);
-      const isEnrolled = user.enrolledCourses && user.enrolledCourses.includes(courseId);
+      
+      // FIXED: Convert ObjectIDs to strings for proper comparison
+      const enrolledIds = user.enrolledCourses ? user.enrolledCourses.map(id => id.toString()) : [];
+      const isEnrolled = enrolledIds.includes(courseId.toString());
       const isAdmin = user.role === 'admin';
 
       if (!isEnrolled && !isAdmin) {
