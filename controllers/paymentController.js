@@ -8,7 +8,15 @@ const sendEmail = require('../utils/sendEmail');
 // @route POST /api/payments/initialize
 const initializePayment = async (req, res) => {
   try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ message: 'Not authorized, please login first with Bearer token' });
+    }
+
     const { courseId, amount } = req.body;
+    if (!courseId) {
+      return res.status(400).json({ message: 'Please provide courseId in request body' });
+    }
+
     const course = await Course.findById(courseId);
     if (!course) {
       return res.status(404).json({ message: 'Course not found' });
@@ -59,29 +67,48 @@ const verifyPayment = async (req, res) => {
     const { tx_ref } = req.params;
     const verification = await verifyChapaPayment(tx_ref);
 
-    if (verification && verification.status === 'success') {
+    const isSuccess = 
+      verification && 
+      (verification.status === 'success' || 
+       verification.status === 'successful' || 
+       verification.data?.status === 'success' || 
+       verification.data?.status === 'successful');
+
+    if (isSuccess) {
       const order = await Order.findOne({ tx_ref }).populate('user course');
-      if (order && order.status !== 'completed') {
-        order.status = 'completed';
-        await order.save();
+      if (order) {
+        if (order.status !== 'completed') {
+          order.status = 'completed';
+          await order.save();
+        }
 
-        // Enroll user in course (adds course ID to enrolledCourses array)
-        await User.findByIdAndUpdate(order.user._id, {
-          $addToSet: { enrolledCourses: order.course._id }
-        });
+        const userId = order.user?._id || order.user;
+        const courseId = order.course?._id || order.course;
+        const userEmail = order.user?.email;
+        const userFirstName = order.user?.firstName || 'Student';
+        const courseTitle = order.course?.title || 'Course';
 
-        // Send confirmation email with course watch/access link
-        try {
-          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-          const courseWatchLink = `${frontendUrl}/courses/${order.course._id}`;
-
-          await sendEmail({
-            email: order.user.email,
-            subject: `Payment Successful! Access Your Course: ${order.course.title} - MrHaile.com`,
-            message: `Hello ${order.user.firstName || 'Student'},\n\nYour payment for "${order.course.title}" was successful!\n\nYou can now watch and access your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
+        if (userId && courseId) {
+          // Enroll user in course (adds course ID to enrolledCourses array)
+          await User.findByIdAndUpdate(userId, {
+            $addToSet: { enrolledCourses: courseId }
           });
-        } catch (emailErr) {
-          console.error('Failed to send course access email:', emailErr.message);
+        }
+
+        // Send confirmation email with course watch/access link (if not already sent or retryable)
+        if (userEmail && courseId) {
+          try {
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+            const courseWatchLink = `${frontendUrl}/courses/${courseId}`;
+
+            await sendEmail({
+              email: userEmail,
+              subject: `Payment Successful! Access Your Course: ${courseTitle} - MrHaile.com`,
+              message: `Hello ${userFirstName},\n\nYour payment for "${courseTitle}" was successful!\n\nYou can now watch and access your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
+            });
+          } catch (emailErr) {
+            console.error('Failed to send course access email:', emailErr.message);
+          }
         }
       }
 
@@ -112,24 +139,34 @@ const simulateSuccessfulPayment = async (req, res) => {
     order.status = 'completed';
     await order.save();
 
-    await User.findByIdAndUpdate(order.user._id, {
-      $addToSet: { enrolledCourses: order.course._id }
-    });
+    const userId = order.user?._id || order.user;
+    const courseId = order.course?._id || order.course;
+    const userEmail = order.user?.email;
+    const userFirstName = order.user?.firstName || 'Student';
+    const courseTitle = order.course?.title || 'Course';
+
+    if (userId && courseId) {
+      await User.findByIdAndUpdate(userId, {
+        $addToSet: { enrolledCourses: courseId }
+      });
+    }
 
     // Send confirmation email with link
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const courseWatchLink = `${frontendUrl}/courses/${order.course._id}`;
+    if (userEmail && courseId) {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const courseWatchLink = `${frontendUrl}/courses/${courseId}`;
 
-    await sendEmail({
-      email: order.user.email,
-      subject: `[Simulated] Access Your Course: ${order.course.title} - MrHaile.com`,
-      message: `Hello ${order.user.firstName || 'Student'},\n\nYour payment for "${order.course.title}" was successfully simulated!\n\nYou can watch your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
-    });
+      await sendEmail({
+        email: userEmail,
+        subject: `[Simulated] Access Your Course: ${courseTitle} - MrHaile.com`,
+        message: `Hello ${userFirstName},\n\nYour payment for "${courseTitle}" was successfully simulated!\n\nYou can watch your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
+      });
+    }
 
     res.json({ 
       message: 'Payment successfully simulated! User enrolled, order marked completed, and email sent.', 
-      courseWatchLink,
-      enrolledCourseId: order.course._id 
+      courseWatchLink: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/courses/${courseId}`,
+      enrolledCourseId: courseId 
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
