@@ -161,13 +161,20 @@ const updateUserProfile = async (req, res) => {
     // Handle profile image upload if file is present
     if (req.file) {
       try {
-        const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-          folder: 'mrhaile_profiles'
+        const uploadResult = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            { folder: 'mrhaile_profiles' },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          uploadStream.end(req.file.buffer);
         });
         user.profileImage = uploadResult.secure_url;
       } catch (uploadError) {
-        // Fallback to local path or error message
-        user.profileImage = req.file.path;
+        console.error('Cloudinary upload error:', uploadError);
+        return res.status(500).json({ message: 'Failed to upload profile image to Cloudinary', error: uploadError.message });
       }
     }
 
