@@ -18,6 +18,7 @@ const reviewRoutes = require('./routes/reviewRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const newsletterRoutes = require('./routes/newsletterRoutes');
 const homeVideoRoutes = require('./routes/homeVideoRoutes');
+const statsRoutes = require('./routes/statsRoutes');
 
 connectDB();
 
@@ -42,6 +43,7 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/newsletter', newsletterRoutes);
 app.use('/api/home-video', homeVideoRoutes);
+app.use('/api/stats', statsRoutes);
 
 app.get('/', (req, res) => {
   res.send('MrHaile.com API is running...');
