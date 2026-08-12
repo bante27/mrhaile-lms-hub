@@ -34,12 +34,13 @@ const getAssetById = async (req, res) => {
   }
 };
 
-// @desc Create asset with YouTube, Bunny.net, PDF, download URL, file upload & Cloudinary thumbnail (Admin)
+// @desc Create asset with YouTube, Bunny.net, PDF file upload, download URL & Cloudinary thumbnail (Admin)
 // @route POST /api/assets
 const createAsset = async (req, res) => {
   try {
-    const { title, description, category, price, youtubeUrl, bunnyUrl, pdfUrl, downloadUrl, isFree } = req.body;
+    const { title, description, category, price, youtubeUrl, bunnyUrl, downloadUrl, isFree } = req.body;
     let fileUrl = req.body.fileUrl || downloadUrl || '';
+    let pdfUrl = req.body.pdfUrl || '';
     let thumbnail = req.body.thumbnail || '';
     
     const isFreeParam = isFree !== undefined ? isFree : true;
@@ -48,6 +49,11 @@ const createAsset = async (req, res) => {
       const assetFile = req.files.find(f => f.fieldname === 'file' || f.fieldname === 'assetFile' || f.fieldname === 'video');
       if (assetFile && assetFile.buffer) {
         fileUrl = await bunnyConfig.uploadAssetFile(assetFile.originalname, assetFile.buffer);
+      }
+
+      const pdfFile = req.files.find(f => f.fieldname === 'pdf' || f.fieldname === 'pdfFile');
+      if (pdfFile && pdfFile.buffer) {
+        pdfUrl = await bunnyConfig.uploadAssetFile(pdfFile.originalname, pdfFile.buffer);
       }
 
       const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
