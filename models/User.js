@@ -11,7 +11,8 @@ const userSchema = new mongoose.Schema({
   role: { type: String, enum: ['student', 'admin', 'instructor'], default: 'student' },
   enrolledCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
   resetPasswordOtp: { type: String },
-  resetPasswordExpires: { type: Date }
+  resetPasswordExpires: { type: Date },
+  isVerified: { type: Boolean, default: true }
 }, { timestamps: true });
 
 userSchema.pre('save', async function(next) {

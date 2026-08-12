@@ -2,7 +2,9 @@ const express = require('express');
 const router = express.Router();
 const {
   registerUser,
+  verifyRegistrationOtp,
   authUser,
+  googleAuth,
   getUserProfile,
   updateUserProfile,
   forgotPassword,
@@ -12,7 +14,9 @@ const { protect, checkEmailCredentials } = require('../middleware/authMiddleware
 const upload = require('../middleware/uploadMiddleware');
 
 router.post('/register', registerUser);
+router.post('/verify-registration', verifyRegistrationOtp);
 router.post('/login', authUser);
+router.post('/google', googleAuth);
 router.get('/profile', protect, getUserProfile);
 router.put('/profile', protect, upload.single('profileImage'), updateUserProfile);
 router.post('/forgot-password', checkEmailCredentials, forgotPassword);

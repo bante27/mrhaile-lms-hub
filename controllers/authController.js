@@ -3,6 +3,7 @@ const generateToken = require('../utils/generateToken');
 const sendEmail = require('../utils/sendEmail');
 const bcrypt = require('bcryptjs');
 const cloudinary = require('../config/cloudinary');
+const axios = require('axios');
 
 // Strict Regex validators
 const nameRegex = /^[A-Za-z]+$/;
@@ -10,7 +11,10 @@ const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const phoneRegex = /^\+?[0-9]{10,15}$/;
 const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
 
-// @desc Register new user
+// In-memory temporary map for pending registrations
+const pendingRegistrations = new Map();
+
+// @desc Register new user - Save OTP in temporary memory, send email (DO NOT save user in DB yet)
 // @route POST /api/auth/register
 const registerUser = async (req, res) => {
   try {
@@ -43,16 +47,68 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
-    const user = await User.create({
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+
+    pendingRegistrations.set(email, {
       firstName,
       lastName,
       email,
       phone,
-      password
+      password,
+      otp,
+      expiresAt
     });
+
+    await sendEmail({
+      email,
+      subject: 'Registration OTP Verification - MrHaile.com',
+      message: `Your registration OTP is: ${otp}. It is valid for 10 minutes.`
+    });
+
+    res.status(200).json({
+      message: 'Registration OTP sent to email. Please verify OTP to complete registration.',
+      email
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Verify Registration OTP & Save User in Database
+// @route POST /api/auth/verify-registration
+const verifyRegistrationOtp = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({ message: 'Please provide email and OTP' });
+    }
+
+    const pending = pendingRegistrations.get(email);
+    if (!pending || pending.otp !== otp || Date.now() > pending.expiresAt) {
+      return res.status(400).json({ message: 'Invalid OTP or OTP has expired' });
+    }
+
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      pendingRegistrations.delete(email);
+      return res.status(400).json({ message: 'User already exists with this email' });
+    }
+
+    const user = await User.create({
+      firstName: pending.firstName,
+      lastName: pending.lastName,
+      email: pending.email,
+      phone: pending.phone,
+      password: pending.password,
+      isVerified: true
+    });
+
+    pendingRegistrations.delete(email);
 
     if (user) {
       res.status(201).json({
+        message: 'Account verified and registered successfully',
         _id: user._id,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -82,7 +138,15 @@ const authUser = async (req, res) => {
 
     const user = await User.findOne({ email });
 
-    if (user && (await user.matchPassword(password))) {
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    if (!user.isVerified) {
+      return res.status(401).json({ message: 'Please verify your email with OTP before logging in' });
+    }
+
+    if (await user.matchPassword(password)) {
       res.json({
         _id: user._id,
         firstName: user.firstName,
@@ -275,4 +339,55 @@ const resetPasswordWithOtp = async (req, res) => {
   }
 };
 
-module.exports = { registerUser, authUser, getUserProfile, updateUserProfile, forgotPassword, resetPasswordWithOtp };
+// @desc Google Login / Register
+// @route POST /api/auth/google
+const googleAuth = async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ message: 'Google token is required' });
+    }
+
+    // Verify Google token
+    const googleResponse = await axios.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
+    const { email, given_name, family_name, picture, email_verified } = googleResponse.data;
+
+    if (!email_verified) {
+      return res.status(400).json({ message: 'Google email not verified' });
+    }
+
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      // Register new user via Google
+      const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8) + 'A1!';
+      user = await User.create({
+        firstName: given_name || 'Google',
+        lastName: family_name || 'User',
+        email,
+        phone: '0000000000',
+        password: randomPassword,
+        profileImage: picture || '',
+        isVerified: true,
+        role: 'student'
+      });
+    }
+
+    res.json({
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phone: user.phone,
+      profileImage: user.profileImage,
+      role: user.role,
+      token: generateToken(user._id),
+      message: 'Google authentication successful'
+    });
+  } catch (error) {
+    console.error('Google Auth Error:', error.response?.data || error.message);
+    res.status(400).json({ message: 'Invalid Google token', error: error.message });
+  }
+};
+
+module.exports = { registerUser, verifyRegistrationOtp, authUser, googleAuth, getUserProfile, updateUserProfile, forgotPassword, resetPasswordWithOtp };
