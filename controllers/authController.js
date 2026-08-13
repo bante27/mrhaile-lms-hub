@@ -1,5 +1,5 @@
 const User = require('../models/User');
-const generateToken = require('../utils/generateToken');
+const { sendTokenResponse } = require('../utils/generateToken');
 const sendEmail = require('../utils/sendEmail');
 const bcrypt = require('bcryptjs');
 const cloudinary = require('../config/cloudinary');
@@ -67,6 +67,7 @@ const registerUser = async (req, res) => {
     });
 
     res.status(200).json({
+      success: true,
       message: 'Registration OTP sent to email. Please verify OTP to complete registration.',
       email
     });
@@ -107,17 +108,7 @@ const verifyRegistrationOtp = async (req, res) => {
     pendingRegistrations.delete(email);
 
     if (user) {
-      res.status(201).json({
-        message: 'Account verified and registered successfully',
-        _id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        phone: user.phone,
-        profileImage: user.profileImage,
-        role: user.role,
-        token: generateToken(user._id),
-      });
+      sendTokenResponse(user, 201, res);
     } else {
       res.status(400).json({ message: 'Invalid user data' });
     }
@@ -147,19 +138,24 @@ const authUser = async (req, res) => {
     }
 
     if (await user.matchPassword(password)) {
-      res.json({
-        _id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        phone: user.phone,
-        profileImage: user.profileImage,
-        role: user.role,
-        token: generateToken(user._id),
-      });
+      sendTokenResponse(user, 200, res);
     } else {
       res.status(401).json({ message: 'Invalid email or password' });
     }
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Logout user / clear cookie
+// @route POST /api/auth/logout
+const logoutUser = async (req, res) => {
+  try {
+    res.cookie('token', 'none', {
+      expires: new Date(Date.now() + 10 * 1000),
+      httpOnly: true,
+    });
+    res.status(200).json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -244,16 +240,7 @@ const updateUserProfile = async (req, res) => {
 
     const updatedUser = await user.save();
 
-    res.json({
-      _id: updatedUser._id,
-      firstName: updatedUser.firstName,
-      lastName: updatedUser.lastName,
-      email: updatedUser.email,
-      phone: updatedUser.phone,
-      profileImage: updatedUser.profileImage,
-      role: updatedUser.role,
-      token: generateToken(updatedUser._id)
-    });
+    sendTokenResponse(updatedUser, 200, res);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -275,15 +262,9 @@ const forgotPassword = async (req, res) => {
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     
-    await User.updateOne(
-      { email },
-      { 
-        $set: { 
-          resetPasswordOtp: otp, 
-          resetPasswordExpires: Date.now() + 10 * 60 * 1000 
-        } 
-      }
-    );
+    user.resetPasswordOtp = otp;
+    user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
+    await user.save();
 
     await sendEmail({
       email: user.email,
@@ -291,7 +272,7 @@ const forgotPassword = async (req, res) => {
       message: `Your password reset OTP is: ${otp}. It is valid for 10 minutes.`
     });
 
-    res.json({ message: 'Password reset OTP sent to email successfully' });
+    res.json({ success: true, message: 'Password reset OTP sent to email successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -322,18 +303,12 @@ const resetPasswordWithOtp = async (req, res) => {
       return res.status(400).json({ message: 'Invalid OTP or OTP has expired' });
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
+    user.password = newPassword;
+    user.resetPasswordOtp = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
 
-    await User.updateOne(
-      { email },
-      { 
-        $set: { password: hashedPassword },
-        $unset: { resetPasswordOtp: 1, resetPasswordExpires: 1 }
-      }
-    );
-
-    res.json({ message: 'Password reset successfully. You can now login.' });
+    res.json({ success: true, message: 'Password reset successfully. You can now login.' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -373,21 +348,21 @@ const googleAuth = async (req, res) => {
       });
     }
 
-    res.json({
-      _id: user._id,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      email: user.email,
-      phone: user.phone,
-      profileImage: user.profileImage,
-      role: user.role,
-      token: generateToken(user._id),
-      message: 'Google authentication successful'
-    });
+    sendTokenResponse(user, 200, res);
   } catch (error) {
     console.error('Google Auth Error:', error.response?.data || error.message);
     res.status(400).json({ message: 'Invalid Google token', error: error.message });
   }
 };
 
-module.exports = { registerUser, verifyRegistrationOtp, authUser, googleAuth, getUserProfile, updateUserProfile, forgotPassword, resetPasswordWithOtp };
+module.exports = {
+  registerUser,
+  verifyRegistrationOtp,
+  authUser,
+  logoutUser,
+  googleAuth,
+  getUserProfile,
+  updateUserProfile,
+  forgotPassword,
+  resetPasswordWithOtp
+};
