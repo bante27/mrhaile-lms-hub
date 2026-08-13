@@ -25,7 +25,19 @@ connectDB();
 
 const app = express();
 
-app.use(cors());
+const allowedOrigins = ['http://localhost:5173', 'http://localhost:3000', process.env.FRONTEND_URL].filter(Boolean);
+
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.length > 0 && !allowedOrigins.includes(origin)) {
+      // In development or if origins aren't strictly locked down, you can allow all or specific origins
+      return callback(null, true); // Alternatively, restrict in strict production
+    }
+    return callback(null, true);
+  },
+  credentials: true
+}));
 app.use(express.json());
 app.use(cookieParser());
 
