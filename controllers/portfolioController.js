@@ -11,16 +11,27 @@ const formatPortfolio = (item) => {
   return obj;
 };
 
-// @desc Get all portfolio items (with optional category filter)
-// @route GET /api/portfolio
+// @desc Get all portfolio items with pagination (12 per page)
+// @route GET /api/portfolio?page=1&limit=12&category=...
 const getPortfolioItems = async (req, res) => {
   try {
     const { category } = req.query;
     let query = {};
     if (category) query.category = category;
 
-    const items = await Portfolio.find(query);
-    res.json(items.map(formatPortfolio));
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
+    const total = await Portfolio.countDocuments(query);
+    const items = await Portfolio.find(query).skip(skip).limit(limit).sort({ createdAt: -1 });
+
+    res.json({
+      portfolioItems: items.map(formatPortfolio),
+      page,
+      pages: Math.ceil(total / limit),
+      total
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -2,8 +2,8 @@ const Asset = require('../models/Asset');
 const bunnyConfig = require('../config/bunny');
 const cloudinary = require('../config/cloudinary');
 
-// @desc Get all digital assets & stock footage
-// @route GET /api/assets
+// @desc Get all digital assets & stock footage with pagination (12 per page)
+// @route GET /api/assets?page=1&limit=12&category=...&search=...&isFree=...
 const getAssets = async (req, res) => {
   try {
     const { category, search, isFree } = req.query;
@@ -12,8 +12,19 @@ const getAssets = async (req, res) => {
     if (search) query.title = { $regex: search, $options: 'i' };
     if (isFree !== undefined) query.isFree = isFree === 'true';
 
-    const assets = await Asset.find(query);
-    res.json(assets);
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
+    const total = await Asset.countDocuments(query);
+    const assets = await Asset.find(query).skip(skip).limit(limit).sort({ createdAt: -1 });
+
+    res.json({
+      assets,
+      page,
+      pages: Math.ceil(total / limit),
+      total
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

@@ -55,13 +55,24 @@ const formatCourseWithStats = async (course, req) => {
   return courseObj;
 };
 
-// @desc Get all courses with smart lock/pause access logic
-// @route GET /api/courses
+// @desc Get all courses with smart lock/pause access logic & pagination (12 per page)
+// @route GET /api/courses?page=1&limit=12
 const getCourses = async (req, res) => {
   try {
-    const courses = await Course.find({});
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
+    const total = await Course.countDocuments({});
+    const courses = await Course.find({}).skip(skip).limit(limit);
     const formattedCourses = await Promise.all(courses.map(c => formatCourseWithStats(c, req)));
-    res.json(formattedCourses);
+
+    res.json({
+      courses: formattedCourses,
+      page,
+      pages: Math.ceil(total / limit),
+      total
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -224,3 +235,4 @@ const getLessonVideoToken = async (req, res) => {
 };
 
 module.exports = { getCourses, getCourseById, createCourse, getLessonVideoToken };
+
