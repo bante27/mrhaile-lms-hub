@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const lessonSchema = new mongoose.Schema({
   title: { type: String, required: true },
   bunnyVideoId: { type: String, default: '' }, // Bunny Stream Video ID
+  youtubeUrl: { type: String, default: '' }, // YouTube Embed/Video URL
   duration: { type: String },
   freePreview: { type: Boolean, default: false }
 });

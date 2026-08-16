@@ -24,15 +24,21 @@ const formatCourseWithStats = async (course, req) => {
     }
   }
 
-  // Format lessons with Bunny video URL (Lock/Pause if paid and user not enrolled/admin)
+  // Format lessons with YouTube or Bunny video URL (Lock/Pause if paid and user not enrolled/admin)
   if (courseObj.lessons && Array.isArray(courseObj.lessons)) {
     courseObj.lessons = courseObj.lessons.map(lesson => {
       const canAccess = lesson.freePreview || isEnrolled || isAdmin;
+      let playableUrl = '';
+      if (canAccess) {
+        if (lesson.youtubeUrl && lesson.youtubeUrl.trim() !== '') {
+          playableUrl = lesson.youtubeUrl;
+        } else if (lesson.bunnyVideoId && lesson.bunnyVideoId.trim() !== '') {
+          playableUrl = `https://iframe.mediadelivery.net/embed/${bunnyConfig.libraryId}/${lesson.bunnyVideoId}`;
+        }
+      }
       return {
         ...lesson,
-        videoUrl: canAccess && lesson.bunnyVideoId && lesson.bunnyVideoId.trim() !== ''
-          ? `https://iframe.mediadelivery.net/embed/${bunnyConfig.libraryId}/${lesson.bunnyVideoId}` 
-          : '' // Locked / Paused for unpaid users
+        videoUrl: playableUrl // Locked / Paused for unpaid users, or YouTube / Bunny URL
       };
     });
   }
@@ -173,6 +179,7 @@ const createCourse = async (req, res) => {
       lessons: lessons.map(l => ({
         title: l.title,
         bunnyVideoId: l.bunnyVideoId || '',
+        youtubeUrl: l.youtubeUrl || '',
         duration: l.duration || '0:00',
         freePreview: l.freePreview === true || l.freePreview === 'true'
       }))
@@ -220,8 +227,13 @@ const getLessonVideoToken = async (req, res) => {
       }
     }
 
-    // Generate secure expiring signed URL for Bunny.net Stream
-    const secureVideoUrl = bunnyConfig.generateEmbedUrl(lesson.bunnyVideoId, 7200); // valid for 2 hours
+    // Generate secure expiring signed URL for Bunny.net Stream or use YouTube URL
+    let secureVideoUrl = '';
+    if (lesson.youtubeUrl && lesson.youtubeUrl.trim() !== '') {
+      secureVideoUrl = lesson.youtubeUrl;
+    } else if (lesson.bunnyVideoId && lesson.bunnyVideoId.trim() !== '') {
+      secureVideoUrl = bunnyConfig.generateEmbedUrl(lesson.bunnyVideoId, 7200); // valid for 2 hours
+    }
 
     res.json({
       title: lesson.title,
@@ -234,5 +246,75 @@ const getLessonVideoToken = async (req, res) => {
   }
 };
 
-module.exports = { getCourses, getCourseById, createCourse, getLessonVideoToken };
+// @desc Delete a course by ID (Admin)
+// @route DELETE /api/courses/:id
+const deleteCourse = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    await course.deleteOne();
+    res.json({ message: 'Course removed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Update a course by ID (Admin)
+// @route PUT /api/courses/:id
+const updateCourse = async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+
+    const { title, description, price, instructor, category } = req.body;
+    
+    if (title) course.title = title;
+    if (description) course.description = description;
+    if (price !== undefined) course.price = Number(price);
+    if (instructor) course.instructor = instructor;
+    if (category) course.category = category;
+
+    if (req.body.lessons) {
+      try {
+        course.lessons = typeof req.body.lessons === 'string' 
+          ? JSON.parse(req.body.lessons) 
+          : req.body.lessons;
+      } catch (e) {}
+    }
+
+    if (req.files && Array.isArray(req.files)) {
+      const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
+      if (thumbnailFile && thumbnailFile.buffer) {
+        try {
+          const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              { folder: 'mrhaile_courses' },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result);
+              }
+            );
+            uploadStream.end(thumbnailFile.buffer);
+          });
+          if (uploadResult && uploadResult.secure_url) {
+            course.thumbnail = uploadResult.secure_url;
+          }
+        } catch (err) {}
+      }
+    }
+
+    const updatedCourse = await course.save();
+    const formatted = await formatCourseWithStats(updatedCourse, req);
+    res.json(formatted);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getCourses, getCourseById, createCourse, updateCourse, deleteCourse, getLessonVideoToken };
 

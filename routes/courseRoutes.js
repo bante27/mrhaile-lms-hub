@@ -4,6 +4,8 @@ const {
   getCourses, 
   getCourseById, 
   createCourse, 
+  updateCourse,
+  deleteCourse,
   getLessonVideoToken 
 } = require('../controllers/courseController');
 const { protect, admin } = require('../middleware/authMiddleware');
@@ -18,7 +20,11 @@ router.route('/')
     createCourse
   );
 
-router.route('/:id').get(getCourseById);
+router.route('/:id')
+  .get(getCourseById)
+  .put(protect, admin, upload.any(), updateCourse)
+  .delete(protect, admin, deleteCourse);
+
 router.route('/:id/lessons/:lessonId/video').get(protect, getLessonVideoToken);
 
 module.exports = router;
