@@ -108,4 +108,87 @@ const createAsset = async (req, res) => {
   }
 };
 
-module.exports = { getAssets, getAssetById, createAsset };
+// @desc Update asset by ID (Admin)
+// @route PUT /api/assets/:id
+const updateAsset = async (req, res) => {
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+
+    const { title, description, category, price, youtubeUrl, bunnyUrl, downloadUrl, fileUrl: bodyFileUrl, pdfUrl: bodyPdfUrl, thumbnail: bodyThumbnail, isFree } = req.body;
+
+    if (title) asset.title = title;
+    if (description) asset.description = description;
+    if (category) asset.category = category;
+    if (price !== undefined) asset.price = Number(price);
+    if (youtubeUrl !== undefined) asset.youtubeUrl = youtubeUrl;
+    if (bunnyUrl !== undefined) asset.bunnyUrl = bunnyUrl;
+    if (downloadUrl) {
+      asset.downloadUrl = downloadUrl;
+      asset.fileUrl = downloadUrl;
+    }
+    if (bodyFileUrl) asset.fileUrl = bodyFileUrl;
+    if (bodyPdfUrl) asset.pdfUrl = bodyPdfUrl;
+    if (bodyThumbnail) asset.thumbnail = bodyThumbnail;
+    if (isFree !== undefined) asset.isFree = isFree === true || isFree === 'true';
+
+    if (req.files && Array.isArray(req.files)) {
+      const assetFile = req.files.find(f => f.fieldname === 'file' || f.fieldname === 'assetFile' || f.fieldname === 'video');
+      if (assetFile && assetFile.buffer) {
+        const fileUrl = await bunnyConfig.uploadAssetFile(assetFile.originalname, assetFile.buffer);
+        asset.fileUrl = fileUrl;
+        asset.downloadUrl = fileUrl;
+      }
+
+      const pdfFile = req.files.find(f => f.fieldname === 'pdf' || f.fieldname === 'pdfFile');
+      if (pdfFile && pdfFile.buffer) {
+        const pdfUrl = await bunnyConfig.uploadAssetFile(pdfFile.originalname, pdfFile.buffer);
+        asset.pdfUrl = pdfUrl;
+      }
+
+      const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
+      if (thumbnailFile && thumbnailFile.buffer) {
+        try {
+          const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              { folder: 'mrhaile_assets' },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result);
+              }
+            );
+            uploadStream.end(thumbnailFile.buffer);
+          });
+          if (uploadResult && uploadResult.secure_url) {
+            asset.thumbnail = uploadResult.secure_url;
+          }
+        } catch (err) {}
+      }
+    }
+
+    const updatedAsset = await asset.save();
+    res.json(updatedAsset);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Delete asset by ID (Admin)
+// @route DELETE /api/assets/:id
+const deleteAsset = async (req, res) => {
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+
+    await asset.deleteOne();
+    res.json({ message: 'Asset removed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getAssets, getAssetById, createAsset, updateAsset, deleteAsset };
