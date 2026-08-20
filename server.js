@@ -26,6 +26,18 @@ connectDB();
 
 const app = express();
 
+// Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval'"
+  );
+  next();
+});
+
 const allowedOrigins = ['http://localhost:5173','http://127.0.0.1:5173' ,'http://localhost:3000', process.env.FRONTEND_URL].filter(Boolean);
 
 app.use(cors({

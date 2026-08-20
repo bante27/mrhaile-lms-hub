@@ -14,6 +14,8 @@ const formatHomeVideo = (item) => {
   return {
     _id: obj._id,
     bunnyVideoId: obj.bunnyVideoId || '',
+    youtubeUrl: obj.youtubeUrl || '',
+    youtubeUrl2: obj.youtubeUrl2 || '',
     videoUrl: videoUrl,
     thumbnail: obj.thumbnail || '',
     createdAt: obj.createdAt,
@@ -29,6 +31,8 @@ const getHomeVideo = async (req, res) => {
     if (!homeVideo) {
       homeVideo = await HomeVideo.create({
         bunnyVideoId: '',
+        youtubeUrl: '',
+        youtubeUrl2: '',
         thumbnail: ''
       });
     }
@@ -42,6 +46,8 @@ const getHomeVideo = async (req, res) => {
 const processVideoUpload = async (req) => {
   let finalBunnyId = req.body.bunnyVideoId || '';
   let thumbnail = req.body.thumbnail || '';
+  let youtubeUrl = req.body.youtubeUrl || '';
+  let youtubeUrl2 = req.body.youtubeUrl2 || '';
 
   if (req.files && Array.isArray(req.files)) {
     const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
@@ -73,18 +79,20 @@ const processVideoUpload = async (req) => {
     }
   }
 
-  return { finalBunnyId, thumbnail };
+  return { finalBunnyId, thumbnail, youtubeUrl, youtubeUrl2 };
 };
 
 // @desc Create home page video post (Admin - POST)
 // @route POST /api/home-video
 const createHomeVideo = async (req, res) => {
   try {
-    const { finalBunnyId, thumbnail } = await processVideoUpload(req);
+    const { finalBunnyId, thumbnail, youtubeUrl, youtubeUrl2 } = await processVideoUpload(req);
 
     await HomeVideo.deleteMany({});
     const homeVideo = await HomeVideo.create({
       bunnyVideoId: finalBunnyId,
+      youtubeUrl: youtubeUrl || req.body.youtubeUrl || '',
+      youtubeUrl2: youtubeUrl2 || req.body.youtubeUrl2 || '',
       thumbnail: thumbnail || ''
     });
 
@@ -99,15 +107,21 @@ const createHomeVideo = async (req, res) => {
 const updateHomeVideo = async (req, res) => {
   try {
     let homeVideo = await HomeVideo.findOne();
-    const { finalBunnyId, thumbnail } = await processVideoUpload(req);
+    const { finalBunnyId, thumbnail, youtubeUrl, youtubeUrl2 } = await processVideoUpload(req);
 
     if (!homeVideo) {
       homeVideo = new HomeVideo({
         bunnyVideoId: finalBunnyId,
+        youtubeUrl: youtubeUrl || req.body.youtubeUrl || '',
+        youtubeUrl2: youtubeUrl2 || req.body.youtubeUrl2 || '',
         thumbnail: thumbnail || ''
       });
     } else {
-      if (finalBunnyId) homeVideo.bunnyVideoId = finalBunnyId;
+      if (finalBunnyId !== undefined) homeVideo.bunnyVideoId = finalBunnyId;
+      if (youtubeUrl !== undefined) homeVideo.youtubeUrl = youtubeUrl;
+      else if (req.body.youtubeUrl !== undefined) homeVideo.youtubeUrl = req.body.youtubeUrl;
+      if (youtubeUrl2 !== undefined) homeVideo.youtubeUrl2 = youtubeUrl2;
+      else if (req.body.youtubeUrl2 !== undefined) homeVideo.youtubeUrl2 = req.body.youtubeUrl2;
       if (thumbnail) homeVideo.thumbnail = thumbnail;
     }
 

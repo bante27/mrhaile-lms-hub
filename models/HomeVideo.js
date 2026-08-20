@@ -4,6 +4,8 @@ const homeVideoSchema = new mongoose.Schema({
   title: { type: String, default: '' },
   description: { type: String, default: '' },
   bunnyVideoId: { type: String, default: '' },
+  youtubeUrl: { type: String, default: '' },
+  youtubeUrl2: { type: String, default: '' },
   videoUrl: { type: String },
   thumbnail: { type: String },
   buttonText: { type: String, default: '' },
