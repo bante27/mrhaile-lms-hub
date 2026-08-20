@@ -9,9 +9,8 @@ const verifyCaptcha = async (token) => {
   if (!token) return false;
 
   const secretKey = process.env.CAPTCHA_SECRET_KEY;
-  if (!secretKey) {
-    console.warn('CAPTCHA_SECRET_KEY is not set in environment variables.');
-    return true; // Bypass in development if not configured
+  if (!secretKey || secretKey.trim() === '') {
+    return true; // Bypass verification if secret key is not set
   }
 
   try {

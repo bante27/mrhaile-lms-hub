@@ -12,11 +12,11 @@ const submitContactMessage = async (req, res) => {
       return res.status(400).json({ message: 'Please fill in all required fields (Name, Email, Subject, Message)' });
     }
 
-    // Verify CAPTCHA if configured
-    if (process.env.CAPTCHA_SECRET_KEY) {
+    // Verify CAPTCHA only if secret key is properly configured
+    if (process.env.CAPTCHA_SECRET_KEY && process.env.CAPTCHA_SECRET_KEY.trim() !== '') {
       const isCaptchaValid = await verifyCaptcha(captchaToken);
       if (!isCaptchaValid) {
-        return res.status(400).json({ message: 'Invalid CAPTCHA verification. Please try again.' });
+        return res.status(400).json({ message: 'Invalid CAPTCHA verification. Please complete the CAPTCHA.' });
       }
     }
 
