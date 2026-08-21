@@ -359,6 +359,54 @@ const googleAuth = async (req, res) => {
   }
 };
 
+// @desc Get all users (Admin)
+// @route GET /api/auth/users
+const getUsers = async (req, res) => {
+  try {
+    const users = await User.find({}).select('-password');
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Delete user by admin
+// @route DELETE /api/auth/users/:id
+const deleteUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    await user.deleteOne();
+    res.json({ message: 'User removed successfully by admin' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Block or Unblock user (Restrict / Unblock)
+// @route PUT /api/auth/users/:id/block
+const toggleBlockUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.isBlocked = !user.isBlocked;
+    await user.save();
+
+    res.json({ 
+      success: true, 
+      message: `User has been successfully ${user.isBlocked ? 'blocked/restricted' : 'unblocked'}`,
+      isBlocked: user.isBlocked 
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   registerUser,
   verifyRegistrationOtp,
@@ -368,5 +416,8 @@ module.exports = {
   getUserProfile,
   updateUserProfile,
   forgotPassword,
-  resetPasswordWithOtp
+  resetPasswordWithOtp,
+  getUsers,
+  deleteUser,
+  toggleBlockUser
 };
