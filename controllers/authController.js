@@ -469,5 +469,6 @@ module.exports = {
   resetPasswordWithOtp,
   getUsers,
   deleteUser,
-  toggleBlockUser
+  toggleBlockUser,
+  updateUserRole
 };
