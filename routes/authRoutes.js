@@ -12,9 +12,10 @@ const {
   resetPasswordWithOtp,
   getUsers,
   deleteUser,
-  toggleBlockUser
+  toggleBlockUser,
+  updateUserRole
 } = require('../controllers/authController');
-const { protect, admin, checkEmailCredentials } = require('../middleware/authMiddleware');
+const { protect, admin, superAdmin, checkEmailCredentials } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
 
 router.post('/register', registerUser);
