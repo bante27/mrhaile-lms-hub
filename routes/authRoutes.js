@@ -30,7 +30,7 @@ router.post('/reset-password', resetPasswordWithOtp);
 
 // Admin User Management Routes
 router.get('/users', protect, admin, getUsers);
-router.delete('/users/:id', protect, admin, deleteUser);
+router.delete('/users/:id', protect, superAdmin, deleteUser);
 router.put('/users/:id/block', protect, admin, toggleBlockUser);
 router.put('/users/:id/role', protect, superAdmin, updateUserRole);
 
