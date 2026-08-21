@@ -242,10 +242,69 @@ const getAdminTransactions = async (req, res) => {
   }
 };
 
+// @desc Update order/transaction status (Admin: e.g. pending to completed)
+// @route PUT /api/payments/admin/transactions/:id/status
+const updateTransactionStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['pending', 'completed', 'failed'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status. Must be pending, completed, or failed' });
+    }
+
+    const order = await Order.findById(req.params.id).populate('user course');
+    if (!order) {
+      return res.status(404).json({ message: 'Transaction/Order not found' });
+    }
+
+    const previousStatus = order.status;
+    order.status = status;
+    await order.save();
+
+    // If changed to completed, auto-enroll user and send email
+    if (status === 'completed' && previousStatus !== 'completed') {
+      const userId = order.user?._id || order.user;
+      const courseId = order.course?._id || order.course;
+      const userEmail = order.user?.email;
+      const userFirstName = order.user?.firstName || 'Student';
+      const courseTitle = order.course?.title || 'Course';
+
+      if (userId && courseId) {
+        await User.findByIdAndUpdate(userId, {
+          $addToSet: { enrolledCourses: courseId }
+        });
+      }
+
+      if (userEmail && courseId) {
+        try {
+          const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+          const courseWatchLink = `${frontendUrl}/courses/${courseId}`;
+
+          await sendEmail({
+            email: userEmail,
+            subject: `Payment Approved! Access Your Course: ${courseTitle} - MrHaile.com`,
+            message: `Hello ${userFirstName},\n\nYour payment status for "${courseTitle}" has been manually updated to Completed by Admin!\n\nYou can now watch your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
+          });
+        } catch (emailErr) {
+          console.error('Email error:', emailErr.message);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Transaction status updated to ${status} successfully`,
+      order
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = { 
   initializePayment, 
   verifyPayment, 
   simulateSuccessfulPayment, 
   testEmailDelivery,
-  getAdminTransactions 
+  getAdminTransactions,
+  updateTransactionStatus 
 };
