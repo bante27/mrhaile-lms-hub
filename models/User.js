@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, required: true },
   password: { type: String, required: true },
   profileImage: { type: String, default: '' },
-  role: { type: String, enum: ['student', 'admin', 'instructor'], default: 'student' },
+  role: { type: String, enum: ['student', 'admin', 'superadmin', 'instructor'], default: 'student' },
   enrolledCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
   resetPasswordOtp: { type: String },
   resetPasswordExpires: { type: Date },
