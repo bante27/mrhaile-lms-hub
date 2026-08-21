@@ -62,4 +62,4 @@ const checkEmailCredentials = (req, res, next) => {
     next();
 };
 
-module.exports = { protect, admin, checkEmailCredentials };
+module.exports = { protect, admin, superAdmin, checkEmailCredentials };
