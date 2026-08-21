@@ -370,16 +370,66 @@ const getUsers = async (req, res) => {
   }
 };
 
-// @desc Delete user by admin
+// @desc Delete user by admin / super admin with role protection
 // @route DELETE /api/auth/users/:id
 const deleteUser = async (req, res) => {
   try {
+    const userToDelete = await User.findById(req.params.id);
+    if (!userToDelete) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Sub-admins cannot delete super admins or other admins
+    if (req.user.role === 'admin') {
+      if (userToDelete.role === 'superadmin' || userToDelete.role === 'admin') {
+        return res.status(403).json({ message: 'Regular admins cannot delete admins or super admins' });
+      }
+    }
+
+    // Super admins cannot be deleted unless by another super admin, and protect self-deletion if desired
+    if (userToDelete.role === 'superadmin' && req.user._id.toString() === userToDelete._id.toString()) {
+      return res.status(400).json({ message: 'Super admin cannot delete their own account here' });
+    }
+
+    await userToDelete.deleteOne();
+    res.json({ message: 'User removed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Make or remove admin (promote/demote user) - Super Admin only
+// @route PUT /api/auth/users/:id/role
+const updateUserRole = async (req, res) => {
+  try {
+    const { role } = req.body; // 'admin', 'student', 'instructor'
+    if (!['student', 'admin', 'instructor'].includes(role)) {
+      return res.status(400).json({ message: 'Invalid role specified' });
+    }
+
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    await user.deleteOne();
-    res.json({ message: 'User removed successfully by admin' });
+
+    if (user.role === 'superadmin') {
+      return res.status(403).json({ message: 'Cannot modify superadmin role' });
+    }
+
+    user.role = role;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `User role successfully updated to ${role}`,
+      user: {
+        _id: user._id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role
+      }
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
