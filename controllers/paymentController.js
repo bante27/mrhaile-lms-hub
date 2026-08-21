@@ -227,4 +227,25 @@ const testEmailDelivery = async (req, res) => {
   }
 };
 
-module.exports = { initializePayment, verifyPayment, simulateSuccessfulPayment, testEmailDelivery };
+// @desc Get all course payment transactions/orders (Admin)
+// @route GET /api/payments/admin/transactions
+const getAdminTransactions = async (req, res) => {
+  try {
+    const orders = await Order.find({})
+      .populate('user', 'firstName lastName email phone')
+      .populate('course', 'title price')
+      .sort({ createdAt: -1 });
+
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { 
+  initializePayment, 
+  verifyPayment, 
+  simulateSuccessfulPayment, 
+  testEmailDelivery,
+  getAdminTransactions 
+};
