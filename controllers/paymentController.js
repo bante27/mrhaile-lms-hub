@@ -282,10 +282,31 @@ const updateTransactionStatus = async (req, res) => {
           await sendEmail({
             email: userEmail,
             subject: `Payment Approved! Access Your Course: ${courseTitle} - MrHaile.com`,
-            message: `Hello ${userFirstName},\n\nYour payment status for "${courseTitle}" has been manually updated to Completed by Admin!\n\nYou can now watch your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
+            message: `Hello ${userFirstName},\n\nYour payment status for "${courseTitle}" has been approved and marked as Completed!\n\nYou can now watch and access your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
           });
         } catch (emailErr) {
           console.error('Email error:', emailErr.message);
+        }
+      }
+    } 
+    // If changed from completed to pending or failed, revoke enrollment so user cannot watch the video
+    else if (previousStatus === 'completed' && status !== 'completed') {
+      const userId = order.user?._id || order.user;
+      const courseId = order.course?._id || order.course;
+
+      if (userId && courseId) {
+        // Check if user has any other completed order for this course before revoking
+        const otherCompletedOrder = await Order.findOne({
+          _id: { $ne: order._id },
+          user: userId,
+          course: courseId,
+          status: 'completed'
+        });
+
+        if (!otherCompletedOrder) {
+          await User.findByIdAndUpdate(userId, {
+            $pull: { enrolledCourses: courseId }
+          });
         }
       }
     }
