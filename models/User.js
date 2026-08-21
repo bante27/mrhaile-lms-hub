@@ -12,7 +12,8 @@ const userSchema = new mongoose.Schema({
   enrolledCourses: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
   resetPasswordOtp: { type: String },
   resetPasswordExpires: { type: Date },
-  isVerified: { type: Boolean, default: true }
+  isVerified: { type: Boolean, default: true },
+  isBlocked: { type: Boolean, default: false }
 }, { timestamps: true });
 
 userSchema.pre('save', async function(next) {

@@ -137,6 +137,10 @@ const authUser = async (req, res) => {
       return res.status(401).json({ message: 'Please verify your email with OTP before logging in' });
     }
 
+    if (user.isBlocked) {
+      return res.status(403).json({ message: 'Your account has been restricted or blocked by the admin' });
+    }
+
     if (await user.matchPassword(password)) {
       sendTokenResponse(user, 200, res);
     } else {
