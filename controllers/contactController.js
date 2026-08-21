@@ -1,30 +1,23 @@
 const ContactMessage = require('../models/ContactMessage');
 const sendEmail = require('../utils/sendEmail');
-const verifyCaptcha = require('../utils/verifyCaptcha');
 
 // @desc Submit contact message & send dual email notification (to Admin & Student)
 // @route POST /api/contact
 const submitContactMessage = async (req, res) => {
   try {
-    const { name, email, phone, subject, message, captchaToken } = req.body;
+    const { name, email, phone, subject, message } = req.body;
 
-    if (!name || !email || !subject || !message) {
-      return res.status(400).json({ message: 'Please fill in all required fields (Name, Email, Subject, Message)' });
+    if (!name || !email || !message) {
+      return res.status(400).json({ message: 'Please fill in all required fields (Name, Email, Message)' });
     }
 
-    // Verify CAPTCHA only if secret key is properly configured
-    if (process.env.CAPTCHA_SECRET_KEY && process.env.CAPTCHA_SECRET_KEY.trim() !== '') {
-      const isCaptchaValid = await verifyCaptcha(captchaToken);
-      if (!isCaptchaValid) {
-        return res.status(400).json({ message: 'Invalid CAPTCHA verification. Please complete the CAPTCHA.' });
-      }
-    }
+    const resolvedSubject = subject || 'General Inquiry';
 
     const contactMsg = await ContactMessage.create({
       name,
       email,
       phone: phone || '',
-      subject,
+      subject: resolvedSubject,
       message
     });
 
