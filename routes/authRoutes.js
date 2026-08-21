@@ -32,5 +32,6 @@ router.post('/reset-password', resetPasswordWithOtp);
 router.get('/users', protect, admin, getUsers);
 router.delete('/users/:id', protect, admin, deleteUser);
 router.put('/users/:id/block', protect, admin, toggleBlockUser);
+router.put('/users/:id/role', protect, superAdmin, updateUserRole);
 
 module.exports = router;
