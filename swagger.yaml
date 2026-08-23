@@ -19,6 +19,8 @@ paths:
     get:
       summary: Root API Status
       description: Returns API running status message.
+      tags:
+        - System Status
       responses:
         '200':
           description: API is running successfully
@@ -28,7 +30,8 @@ paths:
     post:
       summary: Register new user
       description: Sends registration OTP to email.
-      tags: [Authentication]
+      tags:
+        - Authentication
       requestBody:
         required: true
         content:
@@ -62,7 +65,8 @@ paths:
     post:
       summary: Verify registration OTP
       description: Verifies OTP and creates user account.
-      tags: [Authentication]
+      tags:
+        - Authentication
       requestBody:
         required: true
         content:
@@ -87,7 +91,8 @@ paths:
     post:
       summary: User login
       description: Authenticates user and returns JWT token.
-      tags: [Authentication]
+      tags:
+        - Authentication
       requestBody:
         required: true
         content:
@@ -112,7 +117,8 @@ paths:
     post:
       summary: Logout user
       description: Clears auth cookies.
-      tags: [Authentication]
+      tags:
+        - Authentication
       responses:
         '200':
           description: Logged out successfully
@@ -121,7 +127,8 @@ paths:
     get:
       summary: Get user profile
       description: Retrieves logged in user profile.
-      tags: [Authentication]
+      tags:
+        - Authentication
       security:
         - BearerAuth: []
       responses:
@@ -132,7 +139,8 @@ paths:
     put:
       summary: Update user profile
       description: Updates user profile details.
-      tags: [Authentication]
+      tags:
+        - Authentication
       security:
         - BearerAuth: []
       requestBody:
@@ -155,7 +163,8 @@ paths:
     get:
       summary: Get all users (Admin)
       description: Retrieves list of all users.
-      tags: [Authentication - Admin]
+      tags:
+        - Admin Users
       security:
         - BearerAuth: []
       responses:
@@ -169,14 +178,16 @@ paths:
     get:
       summary: Get all courses
       description: Retrieves list of all courses.
-      tags: [Courses]
+      tags:
+        - Courses
       responses:
         '200':
           description: Courses retrieved successfully
     post:
       summary: Create course (Admin)
       description: Creates a new course.
-      tags: [Courses]
+      tags:
+        - Courses
       security:
         - BearerAuth: []
       requestBody:
@@ -204,7 +215,8 @@ paths:
     get:
       summary: Get course by ID
       description: Retrieves specific course details.
-      tags: [Courses]
+      tags:
+        - Courses
       parameters:
         - in: path
           name: id
@@ -222,14 +234,16 @@ paths:
     get:
       summary: Get all assets
       description: Retrieves all digital assets.
-      tags: [Assets]
+      tags:
+        - Assets
       responses:
         '200':
           description: Assets retrieved successfully
     post:
       summary: Create asset (Admin)
       description: Uploads and creates a digital asset.
-      tags: [Assets]
+      tags:
+        - Assets
       security:
         - BearerAuth: []
       responses:
@@ -241,7 +255,8 @@ paths:
     post:
       summary: Initialize Chapa payment
       description: Initializes a payment transaction via Chapa.
-      tags: [Payments]
+      tags:
+        - Payments
       security:
         - BearerAuth: []
       requestBody:
@@ -273,7 +288,8 @@ paths:
     get:
       summary: Get all services
       description: Retrieves service offerings.
-      tags: [Services]
+      tags:
+        - Services
       responses:
         '200':
           description: Services retrieved successfully
@@ -283,7 +299,8 @@ paths:
     get:
       summary: Get portfolio items
       description: Retrieves portfolio projects.
-      tags: [Portfolio]
+      tags:
+        - Portfolio
       responses:
         '200':
           description: Portfolio items retrieved successfully
@@ -293,7 +310,8 @@ paths:
     get:
       summary: Get reviews
       description: Retrieves customer reviews.
-      tags: [Reviews]
+      tags:
+        - Reviews
       responses:
         '200':
           description: Reviews retrieved successfully
@@ -303,7 +321,8 @@ paths:
     post:
       summary: Send contact message
       description: Submits a contact inquiry.
-      tags: [Contact]
+      tags:
+        - Contact
       responses:
         '200':
           description: Message sent successfully
@@ -313,7 +332,8 @@ paths:
     post:
       summary: Subscribe to newsletter
       description: Subscribes email to newsletter.
-      tags: [Newsletter]
+      tags:
+        - Newsletter
       responses:
         '200':
           description: Subscribed successfully
@@ -323,7 +343,8 @@ paths:
     get:
       summary: Get home video
       description: Retrieves landing page video info.
-      tags: [Home Video]
+      tags:
+        - Home Video
       responses:
         '200':
           description: Home video retrieved successfully
@@ -333,7 +354,8 @@ paths:
     get:
       summary: Get platform stats
       description: Retrieves overall platform stats.
-      tags: [Stats]
+      tags:
+        - Stats
       responses:
         '200':
           description: Stats retrieved successfully
@@ -343,7 +365,8 @@ paths:
     get:
       summary: Get editing services / plans
       description: Retrieves editing plans and services.
-      tags: [Editing Services]
+      tags:
+        - Editing Services
       responses:
         '200':
           description: Editing info retrieved successfully
