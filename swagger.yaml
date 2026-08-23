@@ -2,7 +2,7 @@ openapi: 3.0.0
 info:
   title: MrHaile.com API
   version: 1.0.0
-  description: Backend REST API documentation for MrHaile.com LMS and Digital Asset Hub.
+  description: Complete Backend REST API documentation for MrHaile.com LMS, Digital Assets, Editing Services, Payments, and Admin Routes.
 servers:
   - url: http://localhost:5000
     description: Local Development Server
@@ -17,40 +17,333 @@ components:
 paths:
   /:
     get:
-      summary: Root endpoint
+      summary: Root API Status
       description: Returns API running status message.
       responses:
         '200':
           description: API is running successfully
-  /api/auth/login:
+
+  # Authentication Routes
+  /api/auth/register:
     post:
-      summary: Login user
-      description: Authenticates user with email and password and returns JWT token.
+      summary: Register new user
+      description: Sends registration OTP to email.
+      tags: [Authentication]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                - email
-                - password
+              required: [firstName, lastName, email, phone, password]
+              properties:
+                firstName:
+                  type: string
+                  example: John
+                lastName:
+                  type: string
+                  example: Doe
+                email:
+                  type: string
+                  example: john@example.com
+                phone:
+                  type: string
+                  example: "+251911223344"
+                password:
+                  type: string
+                  example: "Secret123!@#"
+      responses:
+        '200':
+          description: OTP sent to email successfully
+        '400':
+          description: Validation error or user already exists
+
+  /api/auth/verify-registration:
+    post:
+      summary: Verify registration OTP
+      description: Verifies OTP and creates user account.
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp]
               properties:
                 email:
                   type: string
                   example: john@example.com
+                otp:
+                  type: string
+                  example: "123456"
+      responses:
+        '201':
+          description: Account verified and registered successfully
+        '400':
+          description: Invalid or expired OTP
+
+  /api/auth/login:
+    post:
+      summary: User login
+      description: Authenticates user and returns JWT token.
+      tags: [Authentication]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  example: mitikubantalem07@gmail.com
                 password:
                   type: string
-                  example: Secret123!
+                  example: bante2799@#$
       responses:
         '200':
           description: Login successful
         '401':
-          description: Invalid credentials
+          description: Invalid credentials or unverified email
+
+  /api/auth/logout:
+    post:
+      summary: Logout user
+      description: Clears auth cookies.
+      tags: [Authentication]
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /api/auth/profile:
+    get:
+      summary: Get user profile
+      description: Retrieves logged in user profile.
+      tags: [Authentication]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Profile retrieved successfully
+        '401':
+          description: Not authorized
+    put:
+      summary: Update user profile
+      description: Updates user profile details.
+      tags: [Authentication]
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                phone:
+                  type: string
+      responses:
+        '200':
+          description: Profile updated successfully
+
+  /api/auth/users:
+    get:
+      summary: Get all users (Admin)
+      description: Retrieves list of all users.
+      tags: [Authentication - Admin]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Users retrieved successfully
+        '403':
+          description: Admin access required
+
+  # Courses Routes
   /api/courses:
     get:
       summary: Get all courses
-      description: Retrieves a list of all available LMS courses.
+      description: Retrieves list of all courses.
+      tags: [Courses]
       responses:
         '200':
-          description: List of courses retrieved successfully
+          description: Courses retrieved successfully
+    post:
+      summary: Create course (Admin)
+      description: Creates a new course.
+      tags: [Courses]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, description, price]
+              properties:
+                title:
+                  type: string
+                  example: Node.js Bootcamp
+                description:
+                  type: string
+                  example: Learn Node.js from scratch
+                price:
+                  type: number
+                  example: 49.99
+      responses:
+        '201':
+          description: Course created successfully
+
+  /api/courses/{id}:
+    get:
+      summary: Get course by ID
+      description: Retrieves specific course details.
+      tags: [Courses]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Course retrieved successfully
+        '404':
+          description: Course not found
+
+  # Assets Routes
+  /api/assets:
+    get:
+      summary: Get all assets
+      description: Retrieves all digital assets.
+      tags: [Assets]
+      responses:
+        '200':
+          description: Assets retrieved successfully
+    post:
+      summary: Create asset (Admin)
+      description: Uploads and creates a digital asset.
+      tags: [Assets]
+      security:
+        - BearerAuth: []
+      responses:
+        '201':
+          description: Asset created successfully
+
+  # Payments Routes
+  /api/payments/chapa/initialize:
+    post:
+      summary: Initialize Chapa payment
+      description: Initializes a payment transaction via Chapa.
+      tags: [Payments]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, email, firstName, lastName]
+              properties:
+                amount:
+                  type: number
+                  example: 100
+                email:
+                  type: string
+                  example: user@example.com
+                firstName:
+                  type: string
+                  example: John
+                lastName:
+                  type: string
+                  example: Doe
+      responses:
+        '200':
+          description: Payment initialized successfully
+
+  # Services Routes
+  /api/services:
+    get:
+      summary: Get all services
+      description: Retrieves service offerings.
+      tags: [Services]
+      responses:
+        '200':
+          description: Services retrieved successfully
+
+  # Portfolio Routes
+  /api/portfolio:
+    get:
+      summary: Get portfolio items
+      description: Retrieves portfolio projects.
+      tags: [Portfolio]
+      responses:
+        '200':
+          description: Portfolio items retrieved successfully
+
+  # Reviews Routes
+  /api/reviews:
+    get:
+      summary: Get reviews
+      description: Retrieves customer reviews.
+      tags: [Reviews]
+      responses:
+        '200':
+          description: Reviews retrieved successfully
+
+  # Contact Routes
+  /api/contact:
+    post:
+      summary: Send contact message
+      description: Submits a contact inquiry.
+      tags: [Contact]
+      responses:
+        '200':
+          description: Message sent successfully
+
+  # Newsletter Routes
+  /api/newsletter:
+    post:
+      summary: Subscribe to newsletter
+      description: Subscribes email to newsletter.
+      tags: [Newsletter]
+      responses:
+        '200':
+          description: Subscribed successfully
+
+  # Home Video Routes
+  /api/home-video:
+    get:
+      summary: Get home video
+      description: Retrieves landing page video info.
+      tags: [Home Video]
+      responses:
+        '200':
+          description: Home video retrieved successfully
+
+  # Stats Routes
+  /api/stats:
+    get:
+      summary: Get platform stats
+      description: Retrieves overall platform stats.
+      tags: [Stats]
+      responses:
+        '200':
+          description: Stats retrieved successfully
+
+  # Editing Routes
+  /api/editing:
+    get:
+      summary: Get editing services / plans
+      description: Retrieves editing plans and services.
+      tags: [Editing Services]
+      responses:
+        '200':
+          description: Editing info retrieved successfully
