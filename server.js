@@ -81,6 +81,15 @@ app.get('/', (req, res) => {
   res.send('MrHaile.com API is running...');
 });
 
+// Swagger UI Route
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs, {
+  explorer: true,
+  customSiteTitle: 'MrHaile.com API Documentation',
+  swaggerOptions: {
+    persistAuthorization: true,
+  },
+}));
+
 app.use(notFound);
 app.use(errorHandler);
 
