@@ -22,6 +22,9 @@ const homeVideoRoutes = require('./routes/homeVideoRoutes');
 const statsRoutes = require('./routes/statsRoutes');
 const editingRoutes = require('./routes/editingRoutes');
 
+// Swagger Documentation
+const { swaggerUi, specs } = require('./config/swagger');
+
 connectDB();
 
 const app = express();
