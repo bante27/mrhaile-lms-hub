@@ -1,0 +1,56 @@
+openapi: 3.0.0
+info:
+  title: MrHaile.com API
+  version: 1.0.0
+  description: Backend REST API documentation for MrHaile.com LMS and Digital Asset Hub.
+servers:
+  - url: http://localhost:5000
+    description: Local Development Server
+  - url: https://mrhaile-backend.onrender.com
+    description: Production Server
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+paths:
+  /:
+    get:
+      summary: Root endpoint
+      description: Returns API running status message.
+      responses:
+        '200':
+          description: API is running successfully
+  /api/auth/login:
+    post:
+      summary: Login user
+      description: Authenticates user with email and password and returns JWT token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  example: john@example.com
+                password:
+                  type: string
+                  example: Secret123!
+      responses:
+        '200':
+          description: Login successful
+        '401':
+          description: Invalid credentials
+  /api/courses:
+    get:
+      summary: Get all courses
+      description: Retrieves a list of all available LMS courses.
+      responses:
+        '200':
+          description: List of courses retrieved successfully
