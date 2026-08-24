@@ -8,6 +8,10 @@ const connectDB = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const rateLimit = require('./middleware/rateLimitMiddleware');
 
+const http = require('http');
+const { Server } = require('socket.io');
+const setupSocket = require('./socket/chatSocket');
+
 // Routes
 const authRoutes = require('./routes/authRoutes');
 const courseRoutes = require('./routes/courseRoutes');
@@ -21,6 +25,7 @@ const newsletterRoutes = require('./routes/newsletterRoutes');
 const homeVideoRoutes = require('./routes/homeVideoRoutes');
 const statsRoutes = require('./routes/statsRoutes');
 const editingRoutes = require('./routes/editingRoutes');
+const chatRoutes = require('./routes/chatRoutes');
 
 // Swagger Documentation
 const { swaggerUi, specs } = require('./config/swagger');
@@ -28,6 +33,19 @@ const { swaggerUi, specs } = require('./config/swagger');
 connectDB();
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+    credentials: true
+  }
+});
+
+// Setup Socket.IO
+const chatSocketManager = setupSocket(io);
+app.set('io', io);
+app.set('chatSocketManager', chatSocketManager);
 
 // Security Headers Middleware
 app.use((req, res, next) => {
