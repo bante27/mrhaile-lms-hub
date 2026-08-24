@@ -21,7 +21,6 @@ const getConversations = async (req, res, next) => {
         .populate('userId', 'firstName lastName email profileImage phone isBlocked')
         .sort({ lastMessageAt: -1 });
 
-      // If search filter is provided, filter populated users
       if (search) {
         const searchRegex = new RegExp(search, 'i');
         conversations = conversations.filter(conv => {
@@ -39,7 +38,6 @@ const getConversations = async (req, res, next) => {
         conversations
       });
     } else {
-      // Regular user: gets or creates their own conversation
       let conversation = await Conversation.findOne({ userId })
         .populate('userId', 'firstName lastName email profileImage phone');
 
@@ -70,25 +68,38 @@ const getConversations = async (req, res, next) => {
 // @access  Private
 const getMessages = async (req, res, next) => {
   try {
-    const { conversationId } = req.params;
+    let { conversationId } = req.params;
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
 
-    const conversation = await Conversation.findById(conversationId);
+    let conversation;
+    if (conversationId === 'me' || !mongoose.isValidObjectId(conversationId)) {
+      conversation = await Conversation.findOne({ userId: isAdmin ? userId : userId });
+      if (!conversation) {
+        conversation = await Conversation.create({
+          userId: isAdmin ? userId : userId,
+          lastMessage: 'Conversation started',
+          lastMessageAt: new Date(),
+          unreadCount: 0,
+          status: 'active'
+        });
+      }
+    } else {
+      conversation = await Conversation.findById(conversationId);
+    }
+
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversation not found' });
     }
 
-    // Authorization check
     if (!isAdmin && conversation.userId.toString() !== userId.toString()) {
       return res.status(403).json({ success: false, message: 'Not authorized to access this conversation' });
     }
 
-    const messages = await Message.find({ conversationId })
+    const messages = await Message.find({ conversationId: conversation._id })
       .populate('senderId', 'firstName lastName profileImage role')
       .sort({ createdAt: 1 });
 
-    // Format messages for display (handle soft deletion text replacement)
     const formattedMessages = messages.map(msg => {
       const msgObj = msg.toObject();
       if (msgObj.deletedAt) {
@@ -99,6 +110,7 @@ const getMessages = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
+      conversationId: conversation._id,
       count: formattedMessages.length,
       messages: formattedMessages
     });
@@ -107,12 +119,12 @@ const getMessages = async (req, res, next) => {
   }
 };
 
-// @desc    Send a message via REST API (fallback / optional)
+// @desc    Send a message via REST API
 // @route   POST /api/conversations/:conversationId/messages
 // @access  Private
 const sendMessage = async (req, res, next) => {
   try {
-    const { conversationId } = req.params;
+    let { conversationId } = req.params;
     const { text } = req.body;
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
@@ -121,26 +133,38 @@ const sendMessage = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Message text is required' });
     }
 
-    const conversation = await Conversation.findById(conversationId);
+    let conversation;
+    if (conversationId === 'me' || !mongoose.isValidObjectId(conversationId)) {
+      conversation = await Conversation.findOne({ userId });
+      if (!conversation) {
+        conversation = await Conversation.create({
+          userId,
+          lastMessage: text.trim(),
+          lastMessageAt: new Date(),
+          unreadCount: 1,
+          status: 'active'
+        });
+      }
+    } else {
+      conversation = await Conversation.findById(conversationId);
+    }
+
     if (!conversation) {
-      return res.status(404).json({ success: false, message: 'Conversation not found' });
+      conversation = await Conversation.create({
+        userId: isAdmin ? userId : userId,
+        lastMessage: text.trim(),
+        lastMessageAt: new Date(),
+        unreadCount: 1,
+        status: 'active'
+      });
     }
 
     if (!isAdmin && conversation.userId.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized to send messages in this conversation' });
-    }
-
-    // If admin sends message, unreadCount for user increases if user is recipient, etc.
-    let unreadCountIncrement = 0;
-    if (isAdmin) {
-      unreadCountIncrement = 1;
-    } else {
-      // If user sends message, increment unread count for admin view
-      unreadCountIncrement = 1;
+      return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
     const message = await Message.create({
-      conversationId,
+      conversationId: conversation._id,
       senderId: userId,
       senderRole: role,
       text: text.trim(),
@@ -151,8 +175,9 @@ const sendMessage = async (req, res, next) => {
     conversation.lastMessageAt = new Date();
     if (isAdmin) {
       conversation.adminId = userId;
+    } else {
+      conversation.unreadCount = (conversation.unreadCount || 0) + 1;
     }
-    conversation.unreadCount = (conversation.unreadCount || 0) + unreadCountIncrement;
     await conversation.save();
 
     const populatedMessage = await Message.findById(message._id)
@@ -160,6 +185,7 @@ const sendMessage = async (req, res, next) => {
 
     return res.status(201).json({
       success: true,
+      conversationId: conversation._id,
       message: populatedMessage
     });
   } catch (error) {
@@ -334,3 +360,4 @@ module.exports = {
   deleteMessage,
   updateConversationStatus
 };
+
