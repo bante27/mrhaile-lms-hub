@@ -54,7 +54,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval'"
+    "default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http: https: ws: wss: http://localhost:* https://localhost:*"
   );
   next();
 });
