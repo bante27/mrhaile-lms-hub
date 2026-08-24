@@ -89,6 +89,7 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/newsletter', newsletterRoutes);
 app.use('/api/home-video', homeVideoRoutes);
 app.use('/api/stats', statsRoutes);
+app.use('/api/conversations', chatRoutes);
 
 // Unified Editing Routes (Handles /api/editing, /api/editing-plans, /api/editing-orders)
 app.use('/api/editing', editingRoutes);
