@@ -114,6 +114,6 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 
-app.server = app.listen(PORT, () => {
+app.server = server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
