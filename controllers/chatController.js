@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 
@@ -360,4 +361,3 @@ module.exports = {
   deleteMessage,
   updateConversationStatus
 };
-
