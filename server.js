@@ -52,10 +52,6 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self' https: data: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' http: https: ws: wss: http://localhost:* https://localhost:*"
-  );
   next();
 });
 
