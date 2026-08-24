@@ -62,7 +62,7 @@ const setupSocket = (io) => {
     // Join personal room
     socket.join(`user:${userId}`);
 
-    // 1. Join Conversation
+    // 1. Join Conversation (Strictly isolated per user)
     socket.on('join_conversation', async ({ conversationId }) => {
       try {
         if (!conversationId) return;
@@ -72,16 +72,18 @@ const setupSocket = (io) => {
           return socket.emit('error', { message: 'Conversation not found' });
         }
 
-        // Security check: users can only join their own conversation room
+        // SECURITY CHECK: Clients can ONLY access their own conversation.
+        // If a regular user tries to join another user's conversation room, deny access immediately.
         if (!isAdmin && conversation.userId.toString() !== userId) {
-          return socket.emit('error', { message: 'Unauthorized to access this conversation' });
+          console.warn(`SECURITY VIOLATION: User ${userId} attempted to join unauthorized room conversation:${conversationId}`);
+          return socket.emit('error', { message: 'Unauthorized: You can only access your own conversation' });
         }
 
         const roomName = `conversation:${conversationId}`;
         socket.join(roomName);
-        console.log(`User ${userId} joined room ${roomName}`);
+        console.log(`User ${userId} (${userRole}) successfully joined room ${roomName}`);
 
-        // Mark unread messages in this conversation as read if opened
+        // Mark unread messages as read
         if (isAdmin) {
           await Message.updateMany(
             { conversationId, isRead: false, senderRole: 'student' },
