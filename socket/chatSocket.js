@@ -150,7 +150,6 @@ const setupSocket = (io) => {
         conversation.lastMessageAt = new Date();
         if (isAdmin) {
           conversation.adminId = socket.user._id;
-          conversation.unreadCount = (conversation.unreadCount || 0); // admin message doesn't increase user unread count if user is looking, or increase user unread if not. Let's increment unreadCount for user
         } else {
           conversation.unreadCount = (conversation.unreadCount || 0) + 1;
         }
@@ -161,12 +160,44 @@ const setupSocket = (io) => {
 
         const roomName = `conversation:${conversationId}`;
         
-        // Emit to everyone in the conversation room
+        // Emit user message to conversation room
         io.to(roomName).emit('new_message', populatedMessage);
 
         // Notify admin dashboard
         io.to('admin_room').emit('conversation_updated', conversation);
         io.to(`user:${conversation.userId.toString()}`).emit('conversation_updated', conversation);
+
+        // --- AUTOMATED BOT / AUTO-REPLY CONCEPT ---
+        // If a student sends a message and no admin has replied yet or as an auto-responder:
+        if (!isAdmin) {
+          // Check if message is a greeting like "hi", "hello", "hey"
+          const lowerText = messageText.toLowerCase().trim();
+          if (['hi', 'hello', 'hey', 'start', 'help'].includes(lowerText)) {
+            setTimeout(async () => {
+              const autoReplyText = "Hello! Thanks for reaching out to MrHaile Support. An admin will be with you shortly. How can we help you with your courses today?";
+              
+              const botMessage = await Message.create({
+                conversationId,
+                senderId: socket.user._id, // or system/admin ID
+                senderRole: 'admin',
+                text: autoReplyText,
+                isRead: false
+              });
+
+              conversation.lastMessage = autoReplyText;
+              conversation.lastMessageAt = new Date();
+              conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+              await conversation.save();
+
+              const populatedBotMessage = await Message.findById(botMessage._id)
+                .populate('senderId', 'firstName lastName profileImage role');
+
+              io.to(roomName).emit('new_message', populatedBotMessage);
+              io.to('admin_room').emit('conversation_updated', conversation);
+              io.to(`user:${conversation.userId.toString()}`).emit('conversation_updated', conversation);
+            }, 1000); // 1-second simulated delay
+          }
+        }
 
       } catch (error) {
         console.error('send_message error:', error);
