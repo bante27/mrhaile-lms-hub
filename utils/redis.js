@@ -5,15 +5,27 @@ const redisClient = createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379',
 });
 
+// Flag to track if we've already logged the connection refusal to avoid log spamming
+let isConnected = false;
+
 redisClient.on('error', (err) => {
-  console.error('❌ Redis Client Error:', err);
+  if (err.code === 'ECONNREFUSED') {
+    if (isConnected) {
+      console.warn('⚠️ Redis connection lost:', err.message);
+      isConnected = false;
+    }
+  } else {
+    console.error('❌ Redis Client Error:', err);
+  }
 });
 
 redisClient.on('connect', () => {
+  isConnected = true;
   console.log('🔄 Redis client connected');
 });
 
 redisClient.on('ready', () => {
+  isConnected = true;
   console.log('✅ Redis client ready and authenticated');
 });
 
@@ -24,7 +36,10 @@ const connectRedis = async () => {
       await redisClient.connect();
     }
   } catch (error) {
-    console.warn('⚠️ Redis connection skipped/failed (server will run without caching):', error.message);
+    // Silently catch initial ECONNREFUSED so it doesn't spam logs or crash the app
+    if (error.code !== 'ECONNREFUSED') {
+      console.warn('⚠️ Redis connection skipped/failed (server will run without caching):', error.message);
+    }
   }
 };
 
