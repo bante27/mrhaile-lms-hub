@@ -19,12 +19,12 @@ redisClient.on('ready', () => {
 
 // Self-initializing connection function with graceful fallback handling
 const connectRedis = async () => {
-  if (!redisClient.isOpen && !redisClient.isConnecting) {
-    try {
+  try {
+    if (!redisClient.isOpen && !redisClient.isConnecting) {
       await redisClient.connect();
-    } catch (error) {
-      console.error('❌ Failed to connect to Redis:', error.message);
     }
+  } catch (error) {
+    console.warn('⚠️ Redis connection skipped/failed (server will run without caching):', error.message);
   }
 };
 
