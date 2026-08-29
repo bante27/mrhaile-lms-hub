@@ -1,9 +1,12 @@
 const Review = require('../models/Review');
 const Course = require('../models/Course');
 const Asset = require('../models/Asset');
+const BaseService = require('../services/BaseService');
 
-// @desc Add a review & rating to a Course or Asset
-// @route POST /api/reviews
+const reviewService = new BaseService(Review);
+const courseService = new BaseService(Course);
+const assetService = new BaseService(Asset);
+
 const createReview = async (req, res) => {
   try {
     const { targetId, targetType, rating, comment } = req.body;
@@ -16,29 +19,29 @@ const createReview = async (req, res) => {
       return res.status(400).json({ message: 'Invalid targetType. Must be Course or Asset' });
     }
 
-    // Check if target exists
     let targetExists = null;
     if (targetType === 'Course') {
-      targetExists = await Course.findById(targetId);
+      const { data: course } = await courseService.getById(targetId, 3600);
+      targetExists = course;
     } else {
-      targetExists = await Asset.findById(targetId);
+      const { data: asset } = await assetService.getById(targetId, 3600);
+      targetExists = asset;
     }
 
     if (!targetExists) {
       return res.status(404).json({ message: `${targetType} not found` });
     }
 
-    // Check if user already reviewed this target
     const alreadyReviewed = await Review.findOne({ user: req.user._id, targetId });
     if (alreadyReviewed) {
-      // Update existing review
       alreadyReviewed.rating = Number(rating);
       alreadyReviewed.comment = comment;
       await alreadyReviewed.save();
+      await reviewService.invalidatePattern(`review:*`);
       return res.json({ message: 'Review updated successfully', review: alreadyReviewed });
     }
 
-    const review = await Review.create({
+    const review = await reviewService.create({
       user: req.user._id,
       targetId,
       targetType,
@@ -52,24 +55,24 @@ const createReview = async (req, res) => {
   }
 };
 
-// @desc Get all reviews for a specific Course or Asset
-// @route GET /api/reviews/:targetId
 const getReviewsByTarget = async (req, res) => {
   try {
     const { targetId } = req.params;
-    const reviews = await Review.find({ targetId }).populate('user', 'firstName lastName profileImage');
-    
-    // Calculate average rating
+    const { data: reviews, source } = await reviewService.getAll({ targetId }, 1800, `target-${targetId}`);
+
+    const populatedReviews = await Review.populate(reviews, { path: 'user', select: 'firstName lastName profileImage' });
+
     let avgRating = 0;
-    if (reviews.length > 0) {
-      const sum = reviews.reduce((acc, item) => acc + item.rating, 0);
-      avgRating = (sum / reviews.length).toFixed(1);
+    if (populatedReviews.length > 0) {
+      const sum = populatedReviews.reduce((acc, item) => acc + item.rating, 0);
+      avgRating = (sum / populatedReviews.length).toFixed(1);
     }
 
     res.json({
-      count: reviews.length,
+      source,
+      count: populatedReviews.length,
       averageRating: Number(avgRating),
-      reviews
+      reviews: populatedReviews
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
