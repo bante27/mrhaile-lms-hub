@@ -1,4 +1,4 @@
-const cache = require('../utils/redis');
+const cache = require('../utils/fallbackCache');
 
 /**
  * Senior-level Base Service for Mongoose Models in Express.js

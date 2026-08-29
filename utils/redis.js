@@ -1,62 +1,45 @@
 const { createClient } = require('redis');
 
-// Initialize Redis client using environment variables or default local connection
+// Initialize Redis client using IPv4 explicitly to avoid IPv6 (::1) ECONNREFUSED issues on Windows
 const redisClient = createClient({
-  url: process.env.REDIS_URL || 'redis://localhost:6379',
-});
-
-// Flag to track if we've already logged the connection refusal to avoid log spamming
-let isConnected = false;
-
-redisClient.on('error', (err) => {
-  if (err.code === 'ECONNREFUSED') {
-    if (isConnected) {
-      console.warn('⚠️ Redis connection lost:', err.message);
-      isConnected = false;
-    }
-  } else {
-    console.error('❌ Redis Client Error:', err);
+  url: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+  socket: {
+    connectTimeout: 1000,
+    reconnectStrategy: false // Do not auto-reconnect if local Redis isn't running to keep console clean
   }
 });
 
+// Suppress unhandled error crash when Redis is offline
+redisClient.on('error', (err) => {
+  // Silently ignore connection refused errors so they don't crash the server or spam logs
+});
+
 redisClient.on('connect', () => {
-  isConnected = true;
   console.log('🔄 Redis client connected');
 });
 
 redisClient.on('ready', () => {
-  isConnected = true;
   console.log('✅ Redis client ready and authenticated');
 });
 
-// Self-initializing connection function with graceful fallback handling
-const connectRedis = async () => {
+// Non-blocking connection attempt
+(async () => {
   try {
-    if (!redisClient.isOpen && !redisClient.isConnecting) {
-      await redisClient.connect();
-    }
+    await redisClient.connect();
   } catch (error) {
-    // Silently catch initial ECONNREFUSED so it doesn't spam logs or crash the app
-    if (error.code !== 'ECONNREFUSED') {
-      console.warn('⚠️ Redis connection skipped/failed (server will run without caching):', error.message);
-    }
+    console.log('⚠️ Redis server is offline. Application running normally without cache.');
   }
-};
-
-// Immediately trigger connection attempt
-connectRedis();
+})();
 
 /**
- * Senior-level Cache Wrapper Utility Object
+ * Senior-level Cache Wrapper Utility Object with Fallback
  */
 const cache = {
   client: redisClient,
 
-  /**
-   * Set a key-value pair with optional TTL in seconds
-   */
   async set(key, value, ttlSeconds = null) {
     try {
+      if (!redisClient.isOpen) return;
       const stringValue = typeof value === 'object' ? JSON.stringify(value) : value;
       if (ttlSeconds) {
         await redisClient.set(key, stringValue, { EX: ttlSeconds });
@@ -64,55 +47,48 @@ const cache = {
         await redisClient.set(key, stringValue);
       }
     } catch (error) {
-      console.error(`Redis SET error for key ${key}:`, error.message);
+      // Fail silently if offline
     }
   },
 
-  /**
-   * Get and parse JSON value by key
-   */
   async get(key) {
     try {
+      if (!redisClient.isOpen) return null;
       const data = await redisClient.get(key);
       if (!data) return null;
       try {
         return JSON.parse(data);
       } catch {
-        return data; // Return as plain string if not JSON
+        return data;
       }
     } catch (error) {
-      console.error(`Redis GET error for key ${key}:`, error.message);
       return null;
     }
   },
 
-  /**
-   * Delete one or more keys
-   */
   async del(keys) {
     try {
+      if (!redisClient.isOpen) return;
       if (Array.isArray(keys)) {
         if (keys.length > 0) await redisClient.del(keys);
       } else {
         await redisClient.del(keys);
       }
     } catch (error) {
-      console.error(`Redis DEL error:`, error.message);
+      // Fail silently
     }
   },
 
-  /**
-   * Invalidate keys matching a pattern (e.g., 'course:*')
-   */
   async invalidatePattern(pattern) {
     try {
+      if (!redisClient.isOpen) return;
       const keys = await redisClient.keys(pattern);
       if (keys.length > 0) {
         await redisClient.del(keys);
         console.log(`🧹 Invalidated ${keys.length} keys matching pattern: ${pattern}`);
       }
     } catch (error) {
-      console.error(`Redis pattern invalidation error for ${pattern}:`, error.message);
+      // Fail silently
     }
   }
 };

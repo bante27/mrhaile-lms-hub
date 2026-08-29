@@ -5,7 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const connectDB = require('./config/db');
-const cache = require('./utils/redis');
+const cache = require('./utils/fallbackCache');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 const rateLimit = require('./middleware/rateLimitMiddleware');
 
