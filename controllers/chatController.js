@@ -1,10 +1,11 @@
 const mongoose = require('mongoose');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const BaseService = require('../services/BaseService');
 
-// @desc    Get or create conversation for the authenticated user (or get all for admin)
-// @route   GET /api/conversations
-// @access  Private
+const conversationService = new BaseService(Conversation);
+const messageService = new BaseService(Message);
+
 const getConversations = async (req, res, next) => {
   try {
     const { role, _id: userId } = req.user;
@@ -13,14 +14,19 @@ const getConversations = async (req, res, next) => {
     if (isAdmin) {
       const { search, status } = req.query;
       let query = {};
-      
+
       if (status) {
         query.status = status;
       }
 
-      let conversations = await Conversation.find(query)
-        .populate('userId', 'firstName lastName email profileImage phone isBlocked')
-        .sort({ lastMessageAt: -1 });
+      const { data: rawConversations, source } = await conversationService.getAll(query, 300, `admin-convs-${JSON.stringify(query)}`);
+      let conversations = await Conversation.populate(rawConversations, {
+        path: 'userId',
+        select: 'firstName lastName email profileImage phone isBlocked'
+      });
+
+      // Sort by lastMessageAt descending
+      conversations.sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
 
       if (search) {
         const searchRegex = new RegExp(search, 'i');
@@ -35,28 +41,31 @@ const getConversations = async (req, res, next) => {
 
       return res.status(200).json({
         success: true,
+        source,
         count: conversations.length,
         conversations
       });
     } else {
-      let conversation = await Conversation.findOne({ userId })
-        .populate('userId', 'firstName lastName email profileImage phone');
+      const { data: convs } = await conversationService.getAll({ userId }, 300, `user-conv-${userId}`);
+      let conversation = convs && convs.length > 0 ? convs[0] : null;
 
       if (!conversation) {
-        conversation = await Conversation.create({
+        conversation = await conversationService.create({
           userId,
           lastMessage: 'Conversation started',
           lastMessageAt: new Date(),
           unreadCount: 0,
           status: 'active'
         });
-        conversation = await Conversation.findById(conversation._id)
-          .populate('userId', 'firstName lastName email profileImage phone');
       }
+
+      const populated = await Conversation.findById(conversation._id)
+        .populate('userId', 'firstName lastName email profileImage phone');
 
       return res.status(200).json({
         success: true,
-        conversation
+        source: 'database',
+        conversation: populated
       });
     }
   } catch (error) {
@@ -64,9 +73,6 @@ const getConversations = async (req, res, next) => {
   }
 };
 
-// @desc    Get messages for a specific conversation
-// @route   GET /api/conversations/:conversationId/messages
-// @access  Private
 const getMessages = async (req, res, next) => {
   try {
     let { conversationId } = req.params;
@@ -75,9 +81,10 @@ const getMessages = async (req, res, next) => {
 
     let conversation;
     if (conversationId === 'me' || !mongoose.isValidObjectId(conversationId)) {
-      conversation = await Conversation.findOne({ userId: isAdmin ? userId : userId });
+      const { data: convs } = await conversationService.getAll({ userId: isAdmin ? userId : userId }, 300, `user-conv-${userId}`);
+      conversation = convs && convs.length > 0 ? convs[0] : null;
       if (!conversation) {
-        conversation = await Conversation.create({
+        conversation = await conversationService.create({
           userId: isAdmin ? userId : userId,
           lastMessage: 'Conversation started',
           lastMessageAt: new Date(),
@@ -86,7 +93,8 @@ const getMessages = async (req, res, next) => {
         });
       }
     } else {
-      conversation = await Conversation.findById(conversationId);
+      const { data: conv } = await conversationService.getById(conversationId, 300);
+      conversation = conv;
     }
 
     if (!conversation) {
@@ -97,12 +105,16 @@ const getMessages = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized to access this conversation' });
     }
 
-    const messages = await Message.find({ conversationId: conversation._id })
-      .populate('senderId', 'firstName lastName profileImage role')
-      .sort({ createdAt: 1 });
+    const { data: messages, source } = await messageService.getAll({ conversationId: conversation._id }, 300, `messages-${conversation._id}`);
+    const populatedMessages = await Message.populate(messages, {
+      path: 'senderId',
+      select: 'firstName lastName profileImage role'
+    });
 
-    const formattedMessages = messages.map(msg => {
-      const msgObj = msg.toObject();
+    populatedMessages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    const formattedMessages = populatedMessages.map(msg => {
+      const msgObj = msg.toObject ? msg.toObject() : msg;
       if (msgObj.deletedAt) {
         msgObj.text = 'This message was deleted';
       }
@@ -111,6 +123,7 @@ const getMessages = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
+      source,
       conversationId: conversation._id,
       count: formattedMessages.length,
       messages: formattedMessages
@@ -120,9 +133,6 @@ const getMessages = async (req, res, next) => {
   }
 };
 
-// @desc    Send a message via REST API
-// @route   POST /api/conversations/:conversationId/messages
-// @access  Private
 const sendMessage = async (req, res, next) => {
   try {
     let { conversationId } = req.params;
@@ -136,9 +146,10 @@ const sendMessage = async (req, res, next) => {
 
     let conversation;
     if (conversationId === 'me' || !mongoose.isValidObjectId(conversationId)) {
-      conversation = await Conversation.findOne({ userId });
+      const { data: convs } = await conversationService.getAll({ userId }, 300, `user-conv-${userId}`);
+      conversation = convs && convs.length > 0 ? convs[0] : null;
       if (!conversation) {
-        conversation = await Conversation.create({
+        conversation = await conversationService.create({
           userId,
           lastMessage: text.trim(),
           lastMessageAt: new Date(),
@@ -147,11 +158,12 @@ const sendMessage = async (req, res, next) => {
         });
       }
     } else {
-      conversation = await Conversation.findById(conversationId);
+      const { data: conv } = await conversationService.getById(conversationId, 300);
+      conversation = conv;
     }
 
     if (!conversation) {
-      conversation = await Conversation.create({
+      conversation = await conversationService.create({
         userId: isAdmin ? userId : userId,
         lastMessage: text.trim(),
         lastMessageAt: new Date(),
@@ -164,7 +176,7 @@ const sendMessage = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    const message = await Message.create({
+    const message = await messageService.create({
       conversationId: conversation._id,
       senderId: userId,
       senderRole: role,
@@ -172,14 +184,17 @@ const sendMessage = async (req, res, next) => {
       isRead: false
     });
 
-    conversation.lastMessage = text.trim();
-    conversation.lastMessageAt = new Date();
+    const updateData = {
+      lastMessage: text.trim(),
+      lastMessageAt: new Date()
+    };
     if (isAdmin) {
-      conversation.adminId = userId;
+      updateData.adminId = userId;
     } else {
-      conversation.unreadCount = (conversation.unreadCount || 0) + 1;
+      updateData.unreadCount = (conversation.unreadCount || 0) + 1;
     }
-    await conversation.save();
+
+    await conversationService.update(conversation._id, updateData);
 
     const populatedMessage = await Message.findById(message._id)
       .populate('senderId', 'firstName lastName profileImage role');
@@ -194,21 +209,18 @@ const sendMessage = async (req, res, next) => {
   }
 };
 
-// @desc    Mark message as read
-// @route   PATCH /api/messages/:messageId/read
-// @access  Private
 const markMessageRead = async (req, res, next) => {
   try {
     const { messageId } = req.params;
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
 
-    const message = await Message.findById(messageId);
+    const { data: message } = await messageService.getById(messageId, 300);
     if (!message) {
       return res.status(404).json({ success: false, message: 'Message not found' });
     }
 
-    const conversation = await Conversation.findById(message.conversationId);
+    const { data: conversation } = await conversationService.getById(message.conversationId, 300);
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversation not found' });
     }
@@ -217,13 +229,11 @@ const markMessageRead = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
-    message.isRead = true;
-    await message.save();
+    await messageService.update(messageId, { isRead: true });
 
-    // Reset unread count on conversation if applicable
     if (conversation.unreadCount > 0) {
-      conversation.unreadCount = Math.max(0, conversation.unreadCount - 1);
-      await conversation.save();
+      const newUnread = Math.max(0, conversation.unreadCount - 1);
+      await conversationService.update(conversation._id, { unreadCount: newUnread });
     }
 
     return res.status(200).json({
@@ -235,16 +245,13 @@ const markMessageRead = async (req, res, next) => {
   }
 };
 
-// @desc    Mark all messages in conversation as read
-// @route   PATCH /api/conversations/:conversationId/read
-// @access  Private
 const markConversationRead = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
 
-    const conversation = await Conversation.findById(conversationId);
+    const { data: conversation } = await conversationService.getById(conversationId, 300);
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversation not found' });
     }
@@ -258,8 +265,7 @@ const markConversationRead = async (req, res, next) => {
       { $set: { isRead: true } }
     );
 
-    conversation.unreadCount = 0;
-    await conversation.save();
+    await conversationService.update(conversationId, { unreadCount: 0 });
 
     return res.status(200).json({
       success: true,
@@ -270,22 +276,19 @@ const markConversationRead = async (req, res, next) => {
   }
 };
 
-// @desc    Soft delete message (Delete for me or Delete for everyone)
-// @route   PATCH /api/messages/:messageId/delete
-// @access  Private
 const deleteMessage = async (req, res, next) => {
   try {
     const { messageId } = req.params;
-    const { deleteType } = req.body; // 'everyone' or 'me'
+    const { deleteType } = req.body;
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
 
-    const message = await Message.findById(messageId);
+    const { data: message } = await messageService.getById(messageId, 300);
     if (!message) {
       return res.status(404).json({ success: false, message: 'Message not found' });
     }
 
-    const conversation = await Conversation.findById(message.conversationId);
+    const { data: conversation } = await conversationService.getById(message.conversationId, 300);
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversation not found' });
     }
@@ -295,22 +298,16 @@ const deleteMessage = async (req, res, next) => {
     }
 
     if (deleteType === 'everyone') {
-      // Only sender or admin can delete for everyone
       if (message.senderId.toString() !== userId.toString() && !isAdmin) {
         return res.status(403).json({ success: false, message: 'You can only delete your own messages for everyone' });
       }
-      message.deletedAt = new Date();
-      message.deletedBy = userId;
-      message.text = 'This message was deleted';
-      await message.save();
-    } else {
-      // Delete for me - can be handled client-side or flagged. We'll mark deletedAt for the user or flag it.
-      // For simplicity in 1-to-1 chat, deleteType 'everyone' soft deletes the message content.
-      message.deletedAt = new Date();
-      message.deletedBy = userId;
-      message.text = 'This message was deleted';
-      await message.save();
     }
+
+    await messageService.update(messageId, {
+      deletedAt: new Date(),
+      deletedBy: userId,
+      text: 'This message was deleted'
+    });
 
     return res.status(200).json({
       success: true,
@@ -323,9 +320,6 @@ const deleteMessage = async (req, res, next) => {
   }
 };
 
-// @desc    Update conversation status (active, closed, pending)
-// @route   PATCH /api/conversations/:conversationId/status
-// @access  Private (Admin only)
 const updateConversationStatus = async (req, res, next) => {
   try {
     const { conversationId } = req.params;
@@ -335,17 +329,16 @@ const updateConversationStatus = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid status value' });
     }
 
-    const conversation = await Conversation.findById(conversationId);
+    const { data: conversation } = await conversationService.getById(conversationId, 300);
     if (!conversation) {
       return res.status(404).json({ success: false, message: 'Conversation not found' });
     }
 
-    conversation.status = status;
-    await conversation.save();
+    const updated = await conversationService.update(conversationId, { status });
 
     return res.status(200).json({
       success: true,
-      conversation
+      conversation: updated
     });
   } catch (error) {
     next(error);
