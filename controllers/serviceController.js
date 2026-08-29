@@ -1,7 +1,9 @@
 const ServiceInquiry = require('../models/ServiceInquiry');
 const sendEmail = require('../utils/sendEmail');
+const BaseService = require('../services/BaseService');
 
-// Helper for smart HTML email design
+const serviceInquiryService = new BaseService(ServiceInquiry);
+
 const generateSmartEmailHtml = ({ heading, subtitle, contentHtml, callToAction }) => {
   return `
     <!DOCTYPE html>
@@ -44,8 +46,6 @@ const generateSmartEmailHtml = ({ heading, subtitle, contentHtml, callToAction }
   `;
 };
 
-// @desc Submit video editing / custom quote service inquiry
-// @route POST /api/services/inquiry
 const submitInquiry = async (req, res) => {
   try {
     const { name, email, phone, serviceType, budget, message } = req.body;
@@ -54,7 +54,7 @@ const submitInquiry = async (req, res) => {
       return res.status(400).json({ message: 'Please fill in all required fields (Name, Email, Service Type, Project Details)' });
     }
 
-    const inquiry = await ServiceInquiry.create({
+    const inquiry = await serviceInquiryService.create({
       name,
       email,
       phone: phone || '',
@@ -63,7 +63,6 @@ const submitInquiry = async (req, res) => {
       message
     });
 
-    // 1. Send notification email to admin with smart design
     try {
       const adminEmail = process.env.MAIL_USERNAME || process.env.ADMIN_EMAIL || 'admin@mrhaile.com';
       const adminHtml = generateSmartEmailHtml({
@@ -94,11 +93,8 @@ const submitInquiry = async (req, res) => {
         message: `You have received a new custom editing quote request.\n\nName: ${name}\nEmail: ${email}\nPhone: ${phone || 'N/A'}\nService Type: ${serviceType}\nEstimated Budget: ${budget || 'N/A'}\n\nProject Details & Footage Link:\n${message}`,
         html: adminHtml
       });
-    } catch (emailErr) {
-      console.error('Failed to send inquiry email notification to admin:', emailErr.message);
-    }
+    } catch (emailErr) { }
 
-    // 2. Send smart confirmation / auto-reply email to client
     try {
       const clientHtml = generateSmartEmailHtml({
         heading: 'We Have Received Your Quote Request!',
@@ -127,9 +123,7 @@ const submitInquiry = async (req, res) => {
         message: `Hello ${name},\n\nThank you for reaching out to MrHaile Hub for your ${serviceType} project! We have received your inquiry and will get back to you within 24 hours.\n\nBest regards,\nMrHaile Hub Team`,
         html: clientHtml
       });
-    } catch (clientEmailErr) {
-      console.error('Failed to send auto-reply email to client:', clientEmailErr.message);
-    }
+    } catch (clientEmailErr) { }
 
     res.status(201).json({ message: 'Quote request submitted successfully', inquiry });
   } catch (error) {
@@ -137,21 +131,16 @@ const submitInquiry = async (req, res) => {
   }
 };
 
-// @desc Get all service inquiries (Admin)
-// @route GET /api/services/inquiries
 const getInquiries = async (req, res) => {
   try {
-    const inquiries = await ServiceInquiry.find({}).sort({ createdAt: -1 });
-    res.json(inquiries);
+    const { data: inquiries, source } = await serviceInquiryService.getAll({}, 600, 'all-inquiries');
+    const sorted = [...inquiries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ source, inquiries: sorted });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Admin reply to service inquiry
-// @route POST /api/services/inquiries/:id/reply
-// @desc Admin reply to service inquiry
-// @route POST /api/services/inquiries/:id/reply
 const replyInquiry = async (req, res) => {
   try {
     const { id } = req.params;
@@ -161,28 +150,25 @@ const replyInquiry = async (req, res) => {
       return res.status(400).json({ message: 'Please provide a reply message' });
     }
 
-    const inquiry = await ServiceInquiry.findById(id);
-    if (!inquiry) {
+    const { data: inquiryObj } = await serviceInquiryService.getById(id, 600);
+    if (!inquiryObj) {
       return res.status(404).json({ message: 'Service inquiry not found' });
     }
 
-    inquiry.adminReply = replyMessage;
-    inquiry.repliedAt = Date.now();
-    if (status) {
-      inquiry.status = status;
-    } else {
-      inquiry.status = 'contacted';
-    }
+    const updateData = {
+      adminReply: replyMessage,
+      repliedAt: Date.now(),
+      status: status || 'contacted'
+    };
 
-    await inquiry.save();
+    const updatedInquiry = await serviceInquiryService.update(id, updateData);
 
-    // Send smart HTML reply email to client
     const clientReplyHtml = generateSmartEmailHtml({
-      heading: `Update on Your Inquiry: ${inquiry.serviceType}`,
+      heading: `Update on Your Inquiry: ${updatedInquiry.serviceType}`,
       subtitle: 'Response from MrHaile Hub Team',
       contentHtml: `
-        <p>Hello <strong>${inquiry.name}</strong>,</p>
-        <p>We have an update regarding your custom editing quote request for <strong>${inquiry.serviceType}</strong>:</p>
+        <p>Hello <strong>${updatedInquiry.name}</strong>,</p>
+        <p>We have an update regarding your custom editing quote request for <strong>${updatedInquiry.serviceType}</strong>:</p>
         <div class="highlight-box" style="border-left-color: #0284c7; background: #f0f9ff;">
           <strong>Admin Response:</strong><br><br>
           <span style="white-space: pre-wrap; color: #0f172a;">${replyMessage}</span>
@@ -197,54 +183,49 @@ const replyInquiry = async (req, res) => {
 
     try {
       await sendEmail({
-        email: inquiry.email,
-        subject: `Response regarding your quote request (${inquiry.serviceType}) - MrHaile Hub`,
-        message: `Hello ${inquiry.name},\n\nWe have an update regarding your quote request for ${inquiry.serviceType}:\n\n${replyMessage}\n\nBest regards,\nMrHaile Hub Team`,
+        email: updatedInquiry.email,
+        subject: `Response regarding your quote request (${updatedInquiry.serviceType}) - MrHaile Hub`,
+        message: `Hello ${updatedInquiry.name},\n\nWe have an update regarding your quote request for ${updatedInquiry.serviceType}:\n\n${replyMessage}\n\nBest regards,\nMrHaile Hub Team`,
         html: clientReplyHtml
       });
-      console.log(`Reply email successfully sent to client: ${inquiry.email}`);
     } catch (emailError) {
-      console.error('Failed to send reply email to client:', emailError.message);
-      return res.status(500).json({ 
+      return res.status(500).json({
         message: `Inquiry saved, but failed to send email to client: ${emailError.message}`,
-        inquiry 
+        inquiry: updatedInquiry
       });
     }
 
     res.json({
       message: 'Reply sent successfully to client email',
-      inquiry
+      inquiry: updatedInquiry
     });
   } catch (error) {
-    console.error('Error in replyInquiry:', error.message);
     res.status(500).json({ message: error.message });
   }
 };
-// @route GET /api/services/inquiries/:id
+
 const getInquiryById = async (req, res) => {
   try {
-    const inquiry = await ServiceInquiry.findById(req.params.id);
+    const { data: inquiry, source } = await serviceInquiryService.getById(req.params.id, 600);
     if (!inquiry) {
       return res.status(404).json({ message: 'Service inquiry not found' });
     }
-    res.json(inquiry);
+    res.json({ source, ...inquiry.toObject ? inquiry.toObject() : inquiry });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
+
 const getMyInquiries = async (req, res) => {
   try {
-    const inquiries = await ServiceInquiry.find({
-      user: req.user._id
-    }).sort({ createdAt: -1 });
-
+    const { data: inquiries, source } = await serviceInquiryService.getAll({ user: req.user._id }, 600, `my-inquiries-${req.user._id}`);
+    const sorted = [...inquiries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     res.status(200).json({
       success: true,
-      inquiries
+      source,
+      inquiries: sorted
     });
   } catch (error) {
-    console.error('Error fetching my inquiries:', error);
-
     res.status(500).json({
       success: false,
       message: error.message
@@ -252,4 +233,4 @@ const getMyInquiries = async (req, res) => {
   }
 };
 
-module.exports = { submitInquiry, getInquiries, getInquiryById, getMyInquiries,replyInquiry };
+module.exports = { submitInquiry, getInquiries, getInquiryById, getMyInquiries, replyInquiry };
