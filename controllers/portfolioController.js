@@ -1,8 +1,10 @@
 const Portfolio = require('../models/Portfolio');
 const bunnyConfig = require('../config/bunny');
 const cloudinary = require('../config/cloudinary');
+const BaseService = require('../services/BaseService');
 
-// Helper to format portfolio with YouTube or Bunny video embed URL
+const portfolioService = new BaseService(Portfolio);
+
 const formatPortfolio = (item) => {
   const obj = item.toObject ? item.toObject() : item;
   if (obj.youtubeUrl && obj.youtubeUrl.trim() !== '') {
@@ -13,8 +15,6 @@ const formatPortfolio = (item) => {
   return obj;
 };
 
-// @desc Get all portfolio items with pagination (12 per page)
-// @route GET /api/portfolio?page=1&limit=12&category=...
 const getPortfolioItems = async (req, res) => {
   try {
     const { category } = req.query;
@@ -23,12 +23,12 @@ const getPortfolioItems = async (req, res) => {
 
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 12;
-    const skip = (page - 1) * limit;
 
+    const { data: items, source } = await portfolioService.getAll(query, 1800, `page-${page}-limit-${limit}-cat-${category || ''}`);
     const total = await Portfolio.countDocuments(query);
-    const items = await Portfolio.find(query).skip(skip).limit(limit).sort({ createdAt: -1 });
 
     res.json({
+      source,
       portfolioItems: items.map(formatPortfolio),
       page,
       pages: Math.ceil(total / limit),
@@ -39,13 +39,11 @@ const getPortfolioItems = async (req, res) => {
   }
 };
 
-// @desc Get single portfolio item by ID
-// @route GET /api/portfolio/:id
 const getPortfolioById = async (req, res) => {
   try {
-    const item = await Portfolio.findById(req.params.id);
+    const { data: item, source } = await portfolioService.getById(req.params.id, 3600);
     if (item) {
-      res.json(formatPortfolio(item));
+      res.json({ source, ...formatPortfolio(item) });
     } else {
       res.status(404).json({ message: 'Portfolio item not found' });
     }
@@ -54,8 +52,6 @@ const getPortfolioById = async (req, res) => {
   }
 };
 
-// @desc Create portfolio item with optional video upload, YouTube URL & thumbnail (Admin)
-// @route POST /api/portfolio
 const createPortfolioItem = async (req, res) => {
   try {
     const { title, description, category, bunnyVideoId, youtubeUrl, client, completionDate } = req.body;
@@ -63,7 +59,6 @@ const createPortfolioItem = async (req, res) => {
     let finalBunnyId = bunnyVideoId || '';
 
     if (req.files && Array.isArray(req.files)) {
-      // Handle thumbnail upload to Cloudinary
       const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
       if (thumbnailFile && thumbnailFile.buffer) {
         try {
@@ -77,59 +72,53 @@ const createPortfolioItem = async (req, res) => {
           if (uploadResult && uploadResult.secure_url) {
             thumbnail = uploadResult.secure_url;
           }
-        } catch (err) {
-          // ignore
-        }
+        } catch (err) { }
       }
 
-      // Handle portfolio video file upload to Bunny Stream
       const videoFile = req.files.find(f => f.fieldname === 'video' || f.fieldname === 'portfolioVideo');
       if (videoFile && videoFile.buffer) {
         try {
           finalBunnyId = await bunnyConfig.uploadVideo(title, videoFile.buffer);
-        } catch (err) {
-          console.error('Portfolio video upload error:', err.message);
-        }
+        } catch (err) { }
       }
     }
 
-    const portfolioItem = new Portfolio({
+    const itemData = {
       title,
       description,
-      category, // YouTube, Commercial, Music Video
+      category,
       bunnyVideoId: finalBunnyId,
       youtubeUrl: youtubeUrl || '',
       thumbnail: thumbnail || 'https://res.cloudinary.com/djx6uzc3k/image/upload/sample.jpg',
       client: client || '',
       completionDate: completionDate || ''
-    });
+    };
 
-    const createdItem = await portfolioItem.save();
+    const createdItem = await portfolioService.create(itemData);
     res.status(201).json(formatPortfolio(createdItem));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Update portfolio item by ID (Admin)
-// @route PUT /api/portfolio/:id
 const updatePortfolioItem = async (req, res) => {
   try {
-    const item = await Portfolio.findById(req.params.id);
-    if (!item) {
+    const { data: existing } = await portfolioService.getById(req.params.id, 3600);
+    if (!existing) {
       return res.status(404).json({ message: 'Portfolio item not found' });
     }
 
     const { title, description, category, bunnyVideoId, youtubeUrl, client, completionDate, thumbnail: bodyThumbnail } = req.body;
+    const updateData = {};
 
-    if (title) item.title = title;
-    if (description) item.description = description;
-    if (category) item.category = category;
-    if (bunnyVideoId !== undefined) item.bunnyVideoId = bunnyVideoId;
-    if (youtubeUrl !== undefined) item.youtubeUrl = youtubeUrl;
-    if (client !== undefined) item.client = client;
-    if (completionDate !== undefined) item.completionDate = completionDate;
-    if (bodyThumbnail) item.thumbnail = bodyThumbnail;
+    if (title) updateData.title = title;
+    if (description) updateData.description = description;
+    if (category) updateData.category = category;
+    if (bunnyVideoId !== undefined) updateData.bunnyVideoId = bunnyVideoId;
+    if (youtubeUrl !== undefined) updateData.youtubeUrl = youtubeUrl;
+    if (client !== undefined) updateData.client = client;
+    if (completionDate !== undefined) updateData.completionDate = completionDate;
+    if (bodyThumbnail) updateData.thumbnail = bodyThumbnail;
 
     if (req.files && Array.isArray(req.files)) {
       const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
@@ -143,36 +132,32 @@ const updatePortfolioItem = async (req, res) => {
             uploadStream.end(thumbnailFile.buffer);
           });
           if (uploadResult && uploadResult.secure_url) {
-            item.thumbnail = uploadResult.secure_url;
+            updateData.thumbnail = uploadResult.secure_url;
           }
-        } catch (err) {}
+        } catch (err) { }
       }
 
       const videoFile = req.files.find(f => f.fieldname === 'video' || f.fieldname === 'portfolioVideo');
       if (videoFile && videoFile.buffer) {
         try {
-          item.bunnyVideoId = await bunnyConfig.uploadVideo(item.title, videoFile.buffer);
-        } catch (err) {}
+          updateData.bunnyVideoId = await bunnyConfig.uploadVideo(title || existing.title, videoFile.buffer);
+        } catch (err) { }
       }
     }
 
-    const updatedItem = await item.save();
+    const updatedItem = await portfolioService.update(req.params.id, updateData);
     res.json(formatPortfolio(updatedItem));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Delete portfolio item by ID (Admin)
-// @route DELETE /api/portfolio/:id
 const deletePortfolioItem = async (req, res) => {
   try {
-    const item = await Portfolio.findById(req.params.id);
+    const item = await portfolioService.delete(req.params.id);
     if (!item) {
       return res.status(404).json({ message: 'Portfolio item not found' });
     }
-
-    await item.deleteOne();
     res.json({ message: 'Portfolio item removed successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
