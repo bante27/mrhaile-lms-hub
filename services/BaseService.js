@@ -1,4 +1,4 @@
-const cache = require('./fallbackCache');
+const cache = require('../utils/fallbackCache');
 
 class BaseService {
   constructor(model) {
