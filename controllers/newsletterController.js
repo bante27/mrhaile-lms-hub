@@ -1,8 +1,9 @@
 const Newsletter = require('../models/Newsletter');
 const sendEmail = require('../utils/sendEmail');
+const BaseService = require('../services/BaseService');
 
-// @desc Subscribe to newsletter ("STAY UPDATED" form)
-// @route POST /api/newsletter/subscribe
+const newsletterService = new BaseService(Newsletter);
+
 const subscribeNewsletter = async (req, res) => {
   try {
     const { email } = req.body;
@@ -11,23 +12,20 @@ const subscribeNewsletter = async (req, res) => {
       return res.status(400).json({ message: 'Please provide a valid email address' });
     }
 
-    const existingSubscriber = await Newsletter.findOne({ email });
-    if (existingSubscriber) {
+    const subscribers = await Newsletter.find({ email });
+    if (subscribers.length > 0) {
       return res.status(400).json({ message: 'This email is already subscribed to our newsletter!' });
     }
 
-    const subscriber = await Newsletter.create({ email });
+    const subscriber = await newsletterService.create({ email });
 
-    // Send welcome email to subscriber
     try {
       await sendEmail({
         email,
         subject: 'Welcome to MrHaile.com Newsletter!',
         message: `Hello,\n\nThank you for subscribing to MrHaile.com! You will now receive weekly stock footage drops, free presets, and video editing masterclass tips directly in your inbox.\n\nStay tuned for our latest updates!\n\nBest regards,\nMrHaile.com Team`
       });
-    } catch (emailErr) {
-      console.error('Failed to send newsletter welcome email:', emailErr.message);
-    }
+    } catch (emailErr) { }
 
     res.status(201).json({ message: 'Subscribed successfully! Check your email for updates.', subscriber });
   } catch (error) {
@@ -35,8 +33,6 @@ const subscribeNewsletter = async (req, res) => {
   }
 };
 
-// @desc Broadcast notification update to all subscribers (Admin)
-// @route POST /api/newsletter/broadcast
 const broadcastNewsletter = async (req, res) => {
   try {
     const { subject, message } = req.body;
@@ -45,8 +41,8 @@ const broadcastNewsletter = async (req, res) => {
       return res.status(400).json({ message: 'Please provide both subject and message for the broadcast' });
     }
 
-    const subscribers = await Newsletter.find({});
-    if (subscribers.length === 0) {
+    const { data: subscribers } = await newsletterService.getAll({}, 3600, 'all-subscribers');
+    if (!subscribers || subscribers.length === 0) {
       return res.status(404).json({ message: 'No newsletter subscribers found' });
     }
 
@@ -59,9 +55,7 @@ const broadcastNewsletter = async (req, res) => {
           message: `${message}\n\n---\nYou are receiving this email because you subscribed to MrHaile.com.`
         });
         successCount++;
-      } catch (err) {
-        console.error(`Failed to send email to ${sub.email}:`, err.message);
-      }
+      } catch (err) { }
     }
 
     res.json({ message: `Broadcast sent successfully to ${successCount} of ${subscribers.length} subscribers!` });
@@ -70,12 +64,10 @@ const broadcastNewsletter = async (req, res) => {
   }
 };
 
-// @desc Get all subscribers (Admin)
-// @route GET /api/newsletter/subscribers
 const getSubscribers = async (req, res) => {
   try {
-    const subscribers = await Newsletter.find({});
-    res.json({ count: subscribers.length, subscribers });
+    const { data: subscribers, source } = await newsletterService.getAll({}, 1800, 'all-subscribers');
+    res.json({ source, count: subscribers.length, subscribers });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
