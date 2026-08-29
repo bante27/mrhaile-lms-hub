@@ -3,9 +3,12 @@ const Course = require('../models/Course');
 const User = require('../models/User');
 const { initializeChapaPayment, verifyChapaPayment } = require('../config/chapa');
 const sendEmail = require('../utils/sendEmail');
+const BaseService = require('../services/BaseService');
 
-// @desc Initialize payment with Chapa
-// @route POST /api/payments/initialize
+const orderService = new BaseService(Order);
+const courseService = new BaseService(Course);
+const userService = new BaseService(User);
+
 const initializePayment = async (req, res) => {
   try {
     if (!req.user || !req.user._id) {
@@ -17,14 +20,14 @@ const initializePayment = async (req, res) => {
       return res.status(400).json({ message: 'Please provide courseId in request body' });
     }
 
-    const course = await Course.findById(courseId);
+    const { data: course } = await courseService.getById(courseId, 3600);
     if (!course) {
       return res.status(404).json({ message: 'Course not found' });
     }
 
     const tx_ref = `mrhaile-${Date.now()}`;
 
-    const order = await Order.create({
+    const order = await orderService.create({
       user: req.user._id,
       course: courseId,
       amount: amount || course.price,
@@ -32,7 +35,6 @@ const initializePayment = async (req, res) => {
       status: 'pending'
     });
 
-    // If mock payment is requested or test mode
     if (req.body.mock === true || req.query.mock === 'true') {
       return res.json({
         checkoutUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/checkout/success?tx_ref=${tx_ref}`,
@@ -54,9 +56,9 @@ const initializePayment = async (req, res) => {
     const paymentResponse = await initializeChapaPayment(chapaData);
 
     if (!paymentResponse || !paymentResponse.data || !paymentResponse.data.checkout_url) {
-      return res.status(400).json({ 
-        message: 'Invalid response from Chapa payment gateway. Please check your API keys or Test Mode settings.', 
-        paymentResponse 
+      return res.status(400).json({
+        message: 'Invalid response from Chapa payment gateway. Please check your API keys or Test Mode settings.',
+        paymentResponse
       });
     }
 
@@ -69,26 +71,24 @@ const initializePayment = async (req, res) => {
   }
 };
 
-// @desc Verify Chapa payment, auto-enroll user, and send access/watch link via email
-// @route GET /api/payments/verify/:tx_ref
 const verifyPayment = async (req, res) => {
   try {
     const { tx_ref } = req.params;
     const verification = await verifyChapaPayment(tx_ref);
 
-    const isSuccess = 
-      verification && 
-      (verification.status === 'success' || 
-       verification.status === 'successful' || 
-       verification.data?.status === 'success' || 
-       verification.data?.status === 'successful');
+    const isSuccess =
+      verification &&
+      (verification.status === 'success' ||
+        verification.status === 'successful' ||
+        verification.data?.status === 'success' ||
+        verification.data?.status === 'successful');
 
     if (isSuccess) {
-      const order = await Order.findOne({ tx_ref }).populate('user course');
+      const orders = await Order.find({ tx_ref }).populate('user course');
+      const order = orders[0];
       if (order) {
         if (order.status !== 'completed') {
-          order.status = 'completed';
-          await order.save();
+          await orderService.update(order._id, { status: 'completed' });
         }
 
         const userId = order.user?._id || order.user;
@@ -98,13 +98,16 @@ const verifyPayment = async (req, res) => {
         const courseTitle = order.course?.title || 'Course';
 
         if (userId && courseId) {
-          // Enroll user in course (adds course ID to enrolledCourses array)
-          await User.findByIdAndUpdate(userId, {
-            $addToSet: { enrolledCourses: courseId }
-          });
+          const userObj = await User.findById(userId);
+          if (userObj) {
+            const enrolled = userObj.enrolledCourses ? userObj.enrolledCourses.map(id => id.toString()) : [];
+            if (!enrolled.includes(courseId.toString())) {
+              enrolled.push(courseId);
+              await userService.update(userId, { enrolledCourses: enrolled });
+            }
+          }
         }
 
-        // Send confirmation email with course watch/access link (if not already sent or retryable)
         if (userEmail && courseId) {
           try {
             const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -115,9 +118,7 @@ const verifyPayment = async (req, res) => {
               subject: `Payment Successful! Access Your Course: ${courseTitle} - MrHaile.com`,
               message: `Hello ${userFirstName},\n\nYour payment for "${courseTitle}" was successful!\n\nYou can now watch and access your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
             });
-          } catch (emailErr) {
-            console.error('Failed to send course access email:', emailErr.message);
-          }
+          } catch (emailErr) { }
         }
       }
 
@@ -130,30 +131,28 @@ const verifyPayment = async (req, res) => {
   }
 };
 
-// @desc Simulate successful payment directly in Postman / Frontend (Bypasses Chapa external redirect)
-// @route POST /api/payments/simulate-success
 const simulateSuccessfulPayment = async (req, res) => {
   try {
     const { tx_ref, courseId } = req.body;
-    
+
     let order = null;
     if (tx_ref) {
-      order = await Order.findOne({ tx_ref }).populate('user course');
+      const orders = await Order.find({ tx_ref }).populate('user course');
+      order = orders[0];
     }
 
-    // If order doesn't exist yet, create one on the fly for seamless testing
     if (!order) {
       let targetCourseId = courseId;
       if (!targetCourseId) {
-        const firstCourse = await Course.findOne();
-        if (!firstCourse) {
+        const { data: courses } = await courseService.getAll({}, 3600, 'first-course');
+        if (!courses || courses.length === 0) {
           return res.status(404).json({ message: 'No courses found in database to simulate enrollment' });
         }
-        targetCourseId = firstCourse._id;
+        targetCourseId = courses[0]._id;
       }
 
-      const course = await Course.findById(targetCourseId);
-      order = await Order.create({
+      const { data: course } = await courseService.getById(targetCourseId, 3600);
+      order = await orderService.create({
         user: req.user._id,
         course: targetCourseId,
         amount: course ? course.price : 0,
@@ -162,8 +161,7 @@ const simulateSuccessfulPayment = async (req, res) => {
       });
       order = await Order.findById(order._id).populate('user course');
     } else {
-      order.status = 'completed';
-      await order.save();
+      await orderService.update(order._id, { status: 'completed' });
     }
 
     const userId = order.user?._id || order.user;
@@ -173,12 +171,16 @@ const simulateSuccessfulPayment = async (req, res) => {
     const courseTitle = order.course?.title || 'Course';
 
     if (userId && finalCourseId) {
-      await User.findByIdAndUpdate(userId, {
-        $addToSet: { enrolledCourses: finalCourseId }
-      });
+      const userObj = await User.findById(userId);
+      if (userObj) {
+        const enrolled = userObj.enrolledCourses ? userObj.enrolledCourses.map(id => id.toString()) : [];
+        if (!enrolled.includes(finalCourseId.toString())) {
+          enrolled.push(finalCourseId);
+          await userService.update(userId, { enrolledCourses: enrolled });
+        }
+      }
     }
 
-    // Send confirmation email with link
     if (userEmail && finalCourseId) {
       try {
         const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -189,29 +191,25 @@ const simulateSuccessfulPayment = async (req, res) => {
           subject: `[Simulated] Access Your Course: ${courseTitle} - MrHaile.com`,
           message: `Hello ${userFirstName},\n\nYour payment for "${courseTitle}" was successfully simulated!\n\nYou can watch your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
         });
-      } catch (emailErr) {
-        console.error('Email error:', emailErr.message);
-      }
+      } catch (emailErr) { }
     }
 
-    res.json({ 
-      message: 'Payment successfully simulated! User enrolled, order marked completed, and email sent.', 
+    res.json({
+      message: 'Payment successfully simulated! User enrolled, order marked completed, and email sent.',
       courseWatchLink: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/courses/${finalCourseId}`,
-      enrolledCourseId: finalCourseId 
+      enrolledCourseId: finalCourseId
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Test email delivery directly in Postman
-// @route POST /api/payments/test-email
 const testEmailDelivery = async (req, res) => {
   try {
     const { email, courseTitle } = req.body;
     const targetEmail = email || req.user.email;
     const title = courseTitle || 'Advanced Video Editing Masterclass';
-    
+
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const courseWatchLink = `${frontendUrl}/courses/sample-id`;
 
@@ -227,23 +225,19 @@ const testEmailDelivery = async (req, res) => {
   }
 };
 
-// @desc Get all course payment transactions/orders (Admin)
-// @route GET /api/payments/admin/transactions
 const getAdminTransactions = async (req, res) => {
   try {
-    const orders = await Order.find({})
-      .populate('user', 'firstName lastName email phone')
-      .populate('course', 'title price')
-      .sort({ createdAt: -1 });
-
-    res.json(orders);
+    const { data: orders, source } = await orderService.getAll({}, 600, 'admin-transactions');
+    const populated = await Order.populate(orders, [
+      { path: 'user', select: 'firstName lastName email phone' },
+      { path: 'course', select: 'title price' }
+    ]);
+    res.json({ source, orders: populated });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Update order/transaction status (Admin: e.g. pending to completed)
-// @route PUT /api/payments/admin/transactions/:id/status
 const updateTransactionStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -251,16 +245,15 @@ const updateTransactionStatus = async (req, res) => {
       return res.status(400).json({ message: 'Invalid status. Must be pending, completed, or failed' });
     }
 
-    const order = await Order.findById(req.params.id).populate('user course');
-    if (!order) {
+    const { data: orderObj } = await orderService.getById(req.params.id, 600);
+    if (!orderObj) {
       return res.status(404).json({ message: 'Transaction/Order not found' });
     }
 
-    const previousStatus = order.status;
-    order.status = status;
-    await order.save();
+    const previousStatus = orderObj.status;
+    const updatedOrder = await orderService.update(req.params.id, { status });
+    const order = await Order.findById(updatedOrder._id).populate('user course');
 
-    // If changed to completed, auto-enroll user and send email
     if (status === 'completed' && previousStatus !== 'completed') {
       const userId = order.user?._id || order.user;
       const courseId = order.course?._id || order.course;
@@ -269,9 +262,14 @@ const updateTransactionStatus = async (req, res) => {
       const courseTitle = order.course?.title || 'Course';
 
       if (userId && courseId) {
-        await User.findByIdAndUpdate(userId, {
-          $addToSet: { enrolledCourses: courseId }
-        });
+        const userObj = await User.findById(userId);
+        if (userObj) {
+          const enrolled = userObj.enrolledCourses ? userObj.enrolledCourses.map(id => id.toString()) : [];
+          if (!enrolled.includes(courseId.toString())) {
+            enrolled.push(courseId);
+            await userService.update(userId, { enrolledCourses: enrolled });
+          }
+        }
       }
 
       if (userEmail && courseId) {
@@ -284,18 +282,14 @@ const updateTransactionStatus = async (req, res) => {
             subject: `Payment Approved! Access Your Course: ${courseTitle} - MrHaile.com`,
             message: `Hello ${userFirstName},\n\nYour payment status for "${courseTitle}" has been approved and marked as Completed!\n\nYou can now watch and access your course here:\n${courseWatchLink}\n\nThank you for learning with MrHaile.com!`
           });
-        } catch (emailErr) {
-          console.error('Email error:', emailErr.message);
-        }
+        } catch (emailErr) { }
       }
-    } 
-    // If changed from completed to pending or failed, revoke enrollment so user cannot watch the video
+    }
     else if (previousStatus === 'completed' && status !== 'completed') {
       const userId = order.user?._id || order.user;
       const courseId = order.course?._id || order.course;
 
       if (userId && courseId) {
-        // Check if user has any other completed order for this course before revoking
         const otherCompletedOrder = await Order.findOne({
           _id: { $ne: order._id },
           user: userId,
@@ -304,9 +298,11 @@ const updateTransactionStatus = async (req, res) => {
         });
 
         if (!otherCompletedOrder) {
-          await User.findByIdAndUpdate(userId, {
-            $pull: { enrolledCourses: courseId }
-          });
+          const userObj = await User.findById(userId);
+          if (userObj && userObj.enrolledCourses) {
+            const newEnrolled = userObj.enrolledCourses.filter(id => id.toString() !== courseId.toString());
+            await userService.update(userId, { enrolledCourses: newEnrolled });
+          }
         }
       }
     }
@@ -321,11 +317,11 @@ const updateTransactionStatus = async (req, res) => {
   }
 };
 
-module.exports = { 
-  initializePayment, 
-  verifyPayment, 
-  simulateSuccessfulPayment, 
+module.exports = {
+  initializePayment,
+  verifyPayment,
+  simulateSuccessfulPayment,
   testEmailDelivery,
   getAdminTransactions,
-  updateTransactionStatus 
+  updateTransactionStatus
 };
