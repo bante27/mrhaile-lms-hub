@@ -1,9 +1,10 @@
 const Asset = require('../models/Asset');
 const bunnyConfig = require('../config/bunny');
 const cloudinary = require('../config/cloudinary');
+const BaseService = require('../services/BaseService');
 
-// @desc Get all digital assets & stock footage with pagination (12 per page)
-// @route GET /api/assets?page=1&limit=12&category=...&search=...&isFree=...
+const assetService = new BaseService(Asset);
+
 const getAssets = async (req, res) => {
   try {
     const { category, search, isFree } = req.query;
@@ -14,12 +15,12 @@ const getAssets = async (req, res) => {
 
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 12;
-    const skip = (page - 1) * limit;
 
+    const { data: assets, source } = await assetService.getAll(query, 1800, `page-${page}-limit-${limit}-search-${search || ''}-cat-${category || ''}`);
     const total = await Asset.countDocuments(query);
-    const assets = await Asset.find(query).skip(skip).limit(limit).sort({ createdAt: -1 });
 
     res.json({
+      source,
       assets,
       page,
       pages: Math.ceil(total / limit),
@@ -30,13 +31,11 @@ const getAssets = async (req, res) => {
   }
 };
 
-// @desc Get asset by ID
-// @route GET /api/assets/:id
 const getAssetById = async (req, res) => {
   try {
-    const asset = await Asset.findById(req.params.id);
+    const { data: asset, source } = await assetService.getById(req.params.id, 3600);
     if (asset) {
-      res.json(asset);
+      res.json({ source, ...asset.toObject ? asset.toObject() : asset });
     } else {
       res.status(404).json({ message: 'Asset not found' });
     }
@@ -45,8 +44,6 @@ const getAssetById = async (req, res) => {
   }
 };
 
-// @desc Create asset with YouTube, Bunny.net, PDF file upload, download URL & Cloudinary thumbnail (Admin)
-// @route POST /api/assets
 const createAsset = async (req, res) => {
   try {
     const { title, description, category, price, youtubeUrl, bunnyUrl, downloadUrl, isFree } = req.body;
@@ -87,7 +84,7 @@ const createAsset = async (req, res) => {
       }
     }
 
-    const asset = new Asset({
+    const assetData = {
       title,
       description,
       category,
@@ -99,53 +96,52 @@ const createAsset = async (req, res) => {
       thumbnail: thumbnail || 'https://res.cloudinary.com/djx6uzc3k/image/upload/sample.jpg',
       isFree: isFreeParam === true || isFreeParam === 'true',
       price: Number(price) || 0
-    });
+    };
 
-    const createdAsset = await asset.save();
+    const createdAsset = await assetService.create(assetData);
     res.status(201).json(createdAsset);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Update asset by ID (Admin)
-// @route PUT /api/assets/:id
 const updateAsset = async (req, res) => {
   try {
-    const asset = await Asset.findById(req.params.id);
-    if (!asset) {
+    const { data: existing } = await assetService.getById(req.params.id, 3600);
+    if (!existing) {
       return res.status(404).json({ message: 'Asset not found' });
     }
 
     const { title, description, category, price, youtubeUrl, bunnyUrl, downloadUrl, fileUrl: bodyFileUrl, pdfUrl: bodyPdfUrl, thumbnail: bodyThumbnail, isFree } = req.body;
+    const updateData = {};
 
-    if (title) asset.title = title;
-    if (description) asset.description = description;
-    if (category) asset.category = category;
-    if (price !== undefined) asset.price = Number(price);
-    if (youtubeUrl !== undefined) asset.youtubeUrl = youtubeUrl;
-    if (bunnyUrl !== undefined) asset.bunnyUrl = bunnyUrl;
+    if (title) updateData.title = title;
+    if (description) updateData.description = description;
+    if (category) updateData.category = category;
+    if (price !== undefined) updateData.price = Number(price);
+    if (youtubeUrl !== undefined) updateData.youtubeUrl = youtubeUrl;
+    if (bunnyUrl !== undefined) updateData.bunnyUrl = bunnyUrl;
     if (downloadUrl) {
-      asset.downloadUrl = downloadUrl;
-      asset.fileUrl = downloadUrl;
+      updateData.downloadUrl = downloadUrl;
+      updateData.fileUrl = downloadUrl;
     }
-    if (bodyFileUrl) asset.fileUrl = bodyFileUrl;
-    if (bodyPdfUrl) asset.pdfUrl = bodyPdfUrl;
-    if (bodyThumbnail) asset.thumbnail = bodyThumbnail;
-    if (isFree !== undefined) asset.isFree = isFree === true || isFree === 'true';
+    if (bodyFileUrl) updateData.fileUrl = bodyFileUrl;
+    if (bodyPdfUrl) updateData.pdfUrl = bodyPdfUrl;
+    if (bodyThumbnail) updateData.thumbnail = bodyThumbnail;
+    if (isFree !== undefined) updateData.isFree = isFree === true || isFree === 'true';
 
     if (req.files && Array.isArray(req.files)) {
       const assetFile = req.files.find(f => f.fieldname === 'file' || f.fieldname === 'assetFile' || f.fieldname === 'video');
       if (assetFile && assetFile.buffer) {
         const fileUrl = await bunnyConfig.uploadAssetFile(assetFile.originalname, assetFile.buffer);
-        asset.fileUrl = fileUrl;
-        asset.downloadUrl = fileUrl;
+        updateData.fileUrl = fileUrl;
+        updateData.downloadUrl = fileUrl;
       }
 
       const pdfFile = req.files.find(f => f.fieldname === 'pdf' || f.fieldname === 'pdfFile');
       if (pdfFile && pdfFile.buffer) {
         const pdfUrl = await bunnyConfig.uploadAssetFile(pdfFile.originalname, pdfFile.buffer);
-        asset.pdfUrl = pdfUrl;
+        updateData.pdfUrl = pdfUrl;
       }
 
       const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
@@ -162,29 +158,25 @@ const updateAsset = async (req, res) => {
             uploadStream.end(thumbnailFile.buffer);
           });
           if (uploadResult && uploadResult.secure_url) {
-            asset.thumbnail = uploadResult.secure_url;
+            updateData.thumbnail = uploadResult.secure_url;
           }
         } catch (err) {}
       }
     }
 
-    const updatedAsset = await asset.save();
+    const updatedAsset = await assetService.update(req.params.id, updateData);
     res.json(updatedAsset);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Delete asset by ID (Admin)
-// @route DELETE /api/assets/:id
 const deleteAsset = async (req, res) => {
   try {
-    const asset = await Asset.findById(req.params.id);
+    const asset = await assetService.delete(req.params.id);
     if (!asset) {
       return res.status(404).json({ message: 'Asset not found' });
     }
-
-    await asset.deleteOne();
     res.json({ message: 'Asset removed successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
