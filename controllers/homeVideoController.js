@@ -1,13 +1,15 @@
 const HomeVideo = require('../models/HomeVideo');
 const bunnyConfig = require('../config/bunny');
 const cloudinary = require('../config/cloudinary');
+const BaseService = require('../services/BaseService');
+
+const homeVideoService = new BaseService(HomeVideo);
 
 const formatHomeVideo = (item) => {
   const obj = item.toObject ? item.toObject() : item;
   let videoUrl = '';
   
   if (obj.bunnyVideoId && obj.bunnyVideoId.trim() !== '') {
-    // Disable all player controls and icons for clean home page background playback
     videoUrl = `https://iframe.mediadelivery.net/embed/${bunnyConfig.libraryId}/${obj.bunnyVideoId}?controls=false&autoplay=true&loop=true&muted=true`;
   }
 
@@ -23,26 +25,26 @@ const formatHomeVideo = (item) => {
   };
 };
 
-// @desc Get single video post for home page
-// @route GET /api/home-video
 const getHomeVideo = async (req, res) => {
   try {
-    let homeVideo = await HomeVideo.findOne();
+    const { data: videos, source } = await homeVideoService.getAll({}, 3600, 'home-video-post');
+    let homeVideo = videos && videos.length > 0 ? videos[0] : null;
+
     if (!homeVideo) {
-      homeVideo = await HomeVideo.create({
+      homeVideo = await homeVideoService.create({
         bunnyVideoId: '',
         youtubeUrl: '',
         youtubeUrl2: '',
         thumbnail: ''
       });
     }
-    res.json(formatHomeVideo(homeVideo));
+
+    res.json({ source, ...formatHomeVideo(homeVideo) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// Helper for handling video and thumbnail uploads to Bunny.net and Cloudinary
 const processVideoUpload = async (req) => {
   let finalBunnyId = req.body.bunnyVideoId || '';
   let thumbnail = req.body.thumbnail || '';
@@ -73,23 +75,19 @@ const processVideoUpload = async (req) => {
         if (bunnyId) {
           finalBunnyId = bunnyId;
         }
-      } catch (uploadErr) {
-        console.error('Bunny Stream home video upload error:', uploadErr.message);
-      }
+      } catch (uploadErr) {}
     }
   }
 
   return { finalBunnyId, thumbnail, youtubeUrl, youtubeUrl2 };
 };
 
-// @desc Create home page video post (Admin - POST)
-// @route POST /api/home-video
 const createHomeVideo = async (req, res) => {
   try {
     const { finalBunnyId, thumbnail, youtubeUrl, youtubeUrl2 } = await processVideoUpload(req);
 
     await HomeVideo.deleteMany({});
-    const homeVideo = await HomeVideo.create({
+    const homeVideo = await homeVideoService.create({
       bunnyVideoId: finalBunnyId,
       youtubeUrl: youtubeUrl || req.body.youtubeUrl || '',
       youtubeUrl2: youtubeUrl2 || req.body.youtubeUrl2 || '',
@@ -102,30 +100,31 @@ const createHomeVideo = async (req, res) => {
   }
 };
 
-// @desc Update home page video post (Admin - PUT)
-// @route PUT /api/home-video
 const updateHomeVideo = async (req, res) => {
   try {
-    let homeVideo = await HomeVideo.findOne();
+    const { data: videos } = await homeVideoService.getAll({}, 3600, 'home-video-post');
+    let homeVideo = videos && videos.length > 0 ? videos[0] : null;
     const { finalBunnyId, thumbnail, youtubeUrl, youtubeUrl2 } = await processVideoUpload(req);
 
     if (!homeVideo) {
-      homeVideo = new HomeVideo({
+      const created = await homeVideoService.create({
         bunnyVideoId: finalBunnyId,
         youtubeUrl: youtubeUrl || req.body.youtubeUrl || '',
         youtubeUrl2: youtubeUrl2 || req.body.youtubeUrl2 || '',
         thumbnail: thumbnail || ''
       });
-    } else {
-      if (finalBunnyId !== undefined) homeVideo.bunnyVideoId = finalBunnyId;
-      if (youtubeUrl !== undefined) homeVideo.youtubeUrl = youtubeUrl;
-      else if (req.body.youtubeUrl !== undefined) homeVideo.youtubeUrl = req.body.youtubeUrl;
-      if (youtubeUrl2 !== undefined) homeVideo.youtubeUrl2 = youtubeUrl2;
-      else if (req.body.youtubeUrl2 !== undefined) homeVideo.youtubeUrl2 = req.body.youtubeUrl2;
-      if (thumbnail) homeVideo.thumbnail = thumbnail;
+      return res.json(formatHomeVideo(created));
     }
 
-    const updated = await homeVideo.save();
+    const updateData = {};
+    if (finalBunnyId !== undefined) updateData.bunnyVideoId = finalBunnyId;
+    if (youtubeUrl !== undefined) updateData.youtubeUrl = youtubeUrl;
+    else if (req.body.youtubeUrl !== undefined) updateData.youtubeUrl = req.body.youtubeUrl;
+    if (youtubeUrl2 !== undefined) updateData.youtubeUrl2 = youtubeUrl2;
+    else if (req.body.youtubeUrl2 !== undefined) updateData.youtubeUrl2 = req.body.youtubeUrl2;
+    if (thumbnail) updateData.thumbnail = thumbnail;
+
+    const updated = await homeVideoService.update(homeVideo._id, updateData);
     res.json(formatHomeVideo(updated));
   } catch (error) {
     res.status(500).json({ message: error.message });
