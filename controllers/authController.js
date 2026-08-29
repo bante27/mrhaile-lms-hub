@@ -4,18 +4,17 @@ const sendEmail = require('../utils/sendEmail');
 const bcrypt = require('bcryptjs');
 const cloudinary = require('../config/cloudinary');
 const axios = require('axios');
+const BaseService = require('../services/BaseService');
 
-// Strict Regex validators
+const userService = new BaseService(User);
+
 const nameRegex = /^[A-Za-z]+$/;
 const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const phoneRegex = /^\+?[0-9]{10,15}$/;
 const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
 
-// In-memory temporary map for pending registrations
 const pendingRegistrations = new Map();
 
-// @desc Register new user - Save OTP in temporary memory, send email (DO NOT save user in DB yet)
-// @route POST /api/auth/register
 const registerUser = async (req, res) => {
   try {
     const { firstName, lastName, email, phone, password } = req.body;
@@ -37,8 +36,8 @@ const registerUser = async (req, res) => {
     }
 
     if (!strongPasswordRegex.test(password)) {
-      return res.status(400).json({ 
-        message: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character' 
+      return res.status(400).json({
+        message: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character'
       });
     }
 
@@ -76,8 +75,6 @@ const registerUser = async (req, res) => {
   }
 };
 
-// @desc Verify Registration OTP & Save User in Database
-// @route POST /api/auth/verify-registration
 const verifyRegistrationOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -96,7 +93,8 @@ const verifyRegistrationOtp = async (req, res) => {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
-    const user = await User.create({
+    // Use userService.create() which saves user and invalidates any user list caches
+    const user = await userService.create({
       firstName: pending.firstName,
       lastName: pending.lastName,
       email: pending.email,
@@ -117,8 +115,6 @@ const verifyRegistrationOtp = async (req, res) => {
   }
 };
 
-// @desc Auth user & get token
-// @route POST /api/auth/login
 const authUser = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -151,8 +147,6 @@ const authUser = async (req, res) => {
   }
 };
 
-// @desc Logout user / clear cookie
-// @route POST /api/auth/logout
 const logoutUser = async (req, res) => {
   try {
     res.cookie('token', 'none', {
@@ -165,13 +159,13 @@ const logoutUser = async (req, res) => {
   }
 };
 
-// @desc Get user profile
-// @route GET /api/auth/profile
 const getUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).populate('enrolledCourses');
+    // Use userService.getById() with caching for profile lookup
+    const { data: user, source } = await userService.getById(req.user._id, 1800);
     if (user) {
-      res.json(user);
+      const populatedUser = await User.findById(user._id).populate('enrolledCourses');
+      res.json({ source, ...populatedUser.toObject() });
     } else {
       res.status(404).json({ message: 'User not found' });
     }
@@ -180,16 +174,14 @@ const getUserProfile = async (req, res) => {
   }
 };
 
-// @desc Update user profile (Name, phone, password, profile image)
-// @route PUT /api/auth/profile
 const updateUserProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
+    const { data: userObj } = await userService.getById(req.user._id, 1800);
+    if (!userObj) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    const user = await User.findById(req.user._id);
     const { firstName, lastName, phone, password } = req.body;
 
     if (firstName) {
@@ -215,14 +207,13 @@ const updateUserProfile = async (req, res) => {
 
     if (password) {
       if (!strongPasswordRegex.test(password)) {
-        return res.status(400).json({ 
-          message: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character' 
+        return res.status(400).json({
+          message: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character'
         });
       }
       user.password = password;
     }
 
-    // Handle profile image upload if file is present
     if (req.file) {
       try {
         const uploadResult = await new Promise((resolve, reject) => {
@@ -237,12 +228,18 @@ const updateUserProfile = async (req, res) => {
         });
         user.profileImage = uploadResult.secure_url;
       } catch (uploadError) {
-        console.error('Cloudinary upload error:', uploadError);
         return res.status(500).json({ message: 'Failed to upload profile image to Cloudinary', error: uploadError.message });
       }
     }
 
-    const updatedUser = await user.save();
+    // Use userService.update() which updates DB and automatically invalidates cache for this user
+    const updatedUser = await userService.update(user._id, {
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      password: user.password,
+      profileImage: user.profileImage
+    });
 
     sendTokenResponse(updatedUser, 200, res);
   } catch (error) {
@@ -250,8 +247,6 @@ const updateUserProfile = async (req, res) => {
   }
 };
 
-// @desc Forgot password - Send OTP
-// @route POST /api/auth/forgot-password
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -265,7 +260,7 @@ const forgotPassword = async (req, res) => {
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
+
     user.resetPasswordOtp = otp;
     user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
@@ -282,8 +277,6 @@ const forgotPassword = async (req, res) => {
   }
 };
 
-// @desc Verify OTP & Reset Password
-// @route POST /api/auth/reset-password
 const resetPasswordWithOtp = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -292,8 +285,8 @@ const resetPasswordWithOtp = async (req, res) => {
     }
 
     if (!strongPasswordRegex.test(newPassword)) {
-      return res.status(400).json({ 
-        message: 'New password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character' 
+      return res.status(400).json({
+        message: 'New password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character'
       });
     }
 
@@ -318,8 +311,6 @@ const resetPasswordWithOtp = async (req, res) => {
   }
 };
 
-// @desc Google Login / Register
-// @route POST /api/auth/google
 const googleAuth = async (req, res) => {
   try {
     const { token } = req.body;
@@ -327,7 +318,6 @@ const googleAuth = async (req, res) => {
       return res.status(400).json({ message: 'Google token is required' });
     }
 
-    // Verify Google token
     const googleResponse = await axios.get(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
     const { email, given_name, family_name, picture, email_verified } = googleResponse.data;
 
@@ -338,9 +328,8 @@ const googleAuth = async (req, res) => {
     let user = await User.findOne({ email });
 
     if (!user) {
-      // Register new user via Google
       const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8) + 'A1!';
-      user = await User.create({
+      user = await userService.create({
         firstName: given_name || 'Google',
         lastName: family_name || 'User',
         email,
@@ -354,80 +343,75 @@ const googleAuth = async (req, res) => {
 
     sendTokenResponse(user, 200, res);
   } catch (error) {
-    console.error('Google Auth Error:', error.response?.data || error.message);
     res.status(400).json({ message: 'Invalid Google token', error: error.message });
   }
 };
 
-// @desc Get all users (Admin)
-// @route GET /api/auth/users
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({}).select('-password');
-    res.json(users);
+    const { data: users, source } = await userService.getAll({}, 1800, 'all-users');
+    const sanitizedUsers = users.map(u => {
+      const obj = u.toObject ? u.toObject() : u;
+      delete obj.password;
+      return obj;
+    });
+    res.json({ source, users: sanitizedUsers });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Delete user by admin / super admin with role protection
-// @route DELETE /api/auth/users/:id
 const deleteUser = async (req, res) => {
   try {
-    const userToDelete = await User.findById(req.params.id);
+    const { data: userToDelete } = await userService.getById(req.params.id, 3600);
     if (!userToDelete) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Sub-admins cannot delete super admins or other admins
     if (req.user.role === 'admin') {
       if (userToDelete.role === 'superadmin' || userToDelete.role === 'admin') {
         return res.status(403).json({ message: 'Regular admins cannot delete admins or super admins' });
       }
     }
 
-    // Super admins cannot be deleted unless by another super admin, and protect self-deletion if desired
     if (userToDelete.role === 'superadmin' && req.user._id.toString() === userToDelete._id.toString()) {
       return res.status(400).json({ message: 'Super admin cannot delete their own account here' });
     }
 
-    await userToDelete.deleteOne();
+    await userService.delete(req.params.id);
     res.json({ message: 'User removed successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Make or remove admin (promote/demote user) - Super Admin only
-// @route PUT /api/auth/users/:id/role
 const updateUserRole = async (req, res) => {
   try {
-    const { role } = req.body; // 'admin', 'student', 'instructor'
+    const { role } = req.body;
     if (!['student', 'admin', 'instructor'].includes(role)) {
       return res.status(400).json({ message: 'Invalid role specified' });
     }
 
-    const user = await User.findById(req.params.id);
-    if (!user) {
+    const { data: userObj } = await userService.getById(req.params.id, 3600);
+    if (!userObj) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    if (user.role === 'superadmin') {
+    if (userObj.role === 'superadmin') {
       return res.status(403).json({ message: 'Cannot modify superadmin role' });
     }
 
-    user.role = role;
-    await user.save();
+    const updatedUser = await userService.update(req.params.id, { role });
 
     res.json({
       success: true,
       message: `User role successfully updated to ${role}`,
       user: {
-        _id: user._id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role
+        _id: updatedUser._id,
+        firstName: updatedUser.firstName,
+        lastName: updatedUser.lastName,
+        email: updatedUser.email,
+        role: updatedUser.role
       }
     });
   } catch (error) {
@@ -435,22 +419,20 @@ const updateUserRole = async (req, res) => {
   }
 };
 
-// @desc Block or Unblock user (Restrict / Unblock)
-// @route PUT /api/auth/users/:id/block
 const toggleBlockUser = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id);
-    if (!user) {
+    const { data: userObj } = await userService.getById(req.params.id, 3600);
+    if (!userObj) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    user.isBlocked = !user.isBlocked;
-    await user.save();
+    const newBlockedState = !userObj.isBlocked;
+    const updatedUser = await userService.update(req.params.id, { isBlocked: newBlockedState });
 
-    res.json({ 
-      success: true, 
-      message: `User has been successfully ${user.isBlocked ? 'blocked/restricted' : 'unblocked'}`,
-      isBlocked: user.isBlocked 
+    res.json({
+      success: true,
+      message: `User has been successfully ${updatedUser.isBlocked ? 'blocked/restricted' : 'unblocked'}`,
+      isBlocked: updatedUser.isBlocked
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
