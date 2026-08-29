@@ -3,6 +3,10 @@ const User = require('../models/User');
 const Review = require('../models/Review');
 const bunnyConfig = require('../config/bunny');
 const cloudinary = require('../config/cloudinary');
+const BaseService = require('../services/BaseService');
+
+// Instantiate BaseService for Course
+const courseService = new BaseService(Course);
 
 // Helper to attach playable videoUrl (with Free Preview & Paid Lock/Pause logic) and exact dynamic stats
 const formatCourseWithStats = async (course, req) => {
@@ -50,7 +54,7 @@ const formatCourseWithStats = async (course, req) => {
   // Exact Ratings & Reviews from Database
   const reviews = await Review.find({ targetId: courseObj._id });
   courseObj.numReviews = reviews.length;
-  
+
   if (reviews.length > 0) {
     const sum = reviews.reduce((acc, item) => acc + item.rating, 0);
     courseObj.averageRating = Number((sum / reviews.length).toFixed(1));
@@ -67,13 +71,15 @@ const getCourses = async (req, res) => {
   try {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 12;
-    const skip = (page - 1) * limit;
+
+    // Use BaseService.getAll() which checks Redis cache first
+    const { data: courses, source } = await courseService.getAll({ page, limit }, 1800, `page-${page}-limit-${limit}`);
 
     const total = await Course.countDocuments({});
-    const courses = await Course.find({}).skip(skip).limit(limit);
     const formattedCourses = await Promise.all(courses.map(c => formatCourseWithStats(c, req)));
 
     res.json({
+      source, // 'cache' or 'database'
       courses: formattedCourses,
       page,
       pages: Math.ceil(total / limit),
@@ -88,10 +94,12 @@ const getCourses = async (req, res) => {
 // @route GET /api/courses/:id
 const getCourseById = async (req, res) => {
   try {
-    const course = await Course.findById(req.params.id);
+    // Use BaseService.getById() which checks Redis cache first
+    const { data: course, source } = await courseService.getById(req.params.id, 3600);
+
     if (course) {
       const formatted = await formatCourseWithStats(course, req);
-      res.json(formatted);
+      res.json({ source, ...formatted });
     } else {
       res.status(404).json({ message: 'Course not found' });
     }
@@ -111,8 +119,8 @@ const createCourse = async (req, res) => {
     // Parse lessons from JSON string or individual form-data fields (e.g. lessons[0][title])
     if (req.body.lessons) {
       try {
-        lessons = typeof req.body.lessons === 'string' 
-          ? JSON.parse(req.body.lessons) 
+        lessons = typeof req.body.lessons === 'string'
+          ? JSON.parse(req.body.lessons)
           : req.body.lessons;
       } catch (e) {
         lessons = [];
@@ -169,7 +177,7 @@ const createCourse = async (req, res) => {
       }
     }
 
-    const course = new Course({
+    const courseData = {
       title,
       description,
       price: Number(price) || 0,
@@ -183,9 +191,10 @@ const createCourse = async (req, res) => {
         duration: l.duration || '0:00',
         freePreview: l.freePreview === true || l.freePreview === 'true'
       }))
-    });
+    };
 
-    const createdCourse = await course.save();
+    // Use BaseService.create() which saves to DB and automatically invalidates Redis list cache
+    const createdCourse = await courseService.create(courseData);
     const formatted = await formatCourseWithStats(createdCourse, req);
     res.status(201).json(formatted);
   } catch (error) {
@@ -198,13 +207,15 @@ const createCourse = async (req, res) => {
 const getLessonVideoToken = async (req, res) => {
   try {
     const { id: courseId, lessonId } = req.params;
-    const course = await Course.findById(courseId);
+
+    // Use BaseService.getById() for cached course lookup
+    const { data: course } = await courseService.getById(courseId, 3600);
 
     if (!course) {
       return res.status(404).json({ message: 'Course not found' });
     }
 
-    const lesson = course.lessons.id(lessonId);
+    const lesson = course.lessons.id ? course.lessons.id(lessonId) : course.lessons.find(l => l._id.toString() === lessonId);
     if (!lesson) {
       return res.status(404).json({ message: 'Lesson not found' });
     }
@@ -216,8 +227,7 @@ const getLessonVideoToken = async (req, res) => {
       }
 
       const user = await User.findById(req.user._id);
-      
-      // FIXED: Convert ObjectIDs to strings for proper comparison
+
       const enrolledIds = user.enrolledCourses ? user.enrolledCourses.map(id => id.toString()) : [];
       const isEnrolled = enrolledIds.includes(courseId.toString());
       const isAdmin = user.role === 'admin';
@@ -227,7 +237,6 @@ const getLessonVideoToken = async (req, res) => {
       }
     }
 
-    // Generate secure expiring signed URL for Bunny.net Stream or use YouTube URL
     let secureVideoUrl = '';
     if (lesson.youtubeUrl && lesson.youtubeUrl.trim() !== '') {
       secureVideoUrl = lesson.youtubeUrl;
@@ -250,12 +259,12 @@ const getLessonVideoToken = async (req, res) => {
 // @route DELETE /api/courses/:id
 const deleteCourse = async (req, res) => {
   try {
-    const course = await Course.findById(req.params.id);
+    // Use BaseService.delete() which deletes from DB and purges Redis cache
+    const course = await courseService.delete(req.params.id);
     if (!course) {
       return res.status(404).json({ message: 'Course not found' });
     }
 
-    await course.deleteOne();
     res.json({ message: 'Course removed successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -266,25 +275,26 @@ const deleteCourse = async (req, res) => {
 // @route PUT /api/courses/:id
 const updateCourse = async (req, res) => {
   try {
-    const course = await Course.findById(req.params.id);
-    if (!course) {
+    const { data: existingCourse } = await courseService.getById(req.params.id, 3600);
+    if (!existingCourse) {
       return res.status(404).json({ message: 'Course not found' });
     }
 
     const { title, description, price, instructor, category } = req.body;
-    
-    if (title) course.title = title;
-    if (description) course.description = description;
-    if (price !== undefined) course.price = Number(price);
-    if (instructor) course.instructor = instructor;
-    if (category) course.category = category;
+    const updateData = {};
+
+    if (title) updateData.title = title;
+    if (description) updateData.description = description;
+    if (price !== undefined) updateData.price = Number(price);
+    if (instructor) updateData.instructor = instructor;
+    if (category) updateData.category = category;
 
     if (req.body.lessons) {
       try {
-        course.lessons = typeof req.body.lessons === 'string' 
-          ? JSON.parse(req.body.lessons) 
+        updateData.lessons = typeof req.body.lessons === 'string'
+          ? JSON.parse(req.body.lessons)
           : req.body.lessons;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (req.files && Array.isArray(req.files)) {
@@ -302,13 +312,14 @@ const updateCourse = async (req, res) => {
             uploadStream.end(thumbnailFile.buffer);
           });
           if (uploadResult && uploadResult.secure_url) {
-            course.thumbnail = uploadResult.secure_url;
+            updateData.thumbnail = uploadResult.secure_url;
           }
-        } catch (err) {}
+        } catch (err) { }
       }
     }
 
-    const updatedCourse = await course.save();
+    // Use BaseService.update() which updates DB and clears Redis cache for this course & lists
+    const updatedCourse = await courseService.update(req.params.id, updateData);
     const formatted = await formatCourseWithStats(updatedCourse, req);
     res.json(formatted);
   } catch (error) {
@@ -317,4 +328,3 @@ const updateCourse = async (req, res) => {
 };
 
 module.exports = { getCourses, getCourseById, createCourse, updateCourse, deleteCourse, getLessonVideoToken };
-
