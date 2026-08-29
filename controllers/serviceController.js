@@ -232,5 +232,24 @@ const getInquiryById = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+const getMyInquiries = async (req, res) => {
+  try {
+    const inquiries = await ServiceInquiry.find({
+      user: req.user._id
+    }).sort({ createdAt: -1 });
 
-module.exports = { submitInquiry, getInquiries, getInquiryById, replyInquiry };
+    res.status(200).json({
+      success: true,
+      inquiries
+    });
+  } catch (error) {
+    console.error('Error fetching my inquiries:', error);
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+module.exports = { submitInquiry, getInquiries, getInquiryById, getMyInquiries,replyInquiry };
