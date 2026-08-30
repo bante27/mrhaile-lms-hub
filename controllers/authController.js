@@ -47,9 +47,6 @@ const registerUser = catchAsync(async (req, res, next) => {
 
 const verifyRegistrationOtp = catchAsync(async (req, res, next) => {
   const { email, otp } = req.body;
-  if (!email || !otp) {
-    return next(new AppError('Please provide email and OTP', 400));
-  }
 
   const pending = pendingRegistrations.get(email);
   if (!pending || pending.otp !== otp || Date.now() > pending.expiresAt) {
@@ -184,9 +181,6 @@ const forgotPassword = catchAsync(async (req, res, next) => {
 
 const resetPasswordWithOtp = catchAsync(async (req, res, next) => {
   const { email, otp, newPassword } = req.body;
-  if (!email || !otp || !newPassword) {
-    return next(new AppError('Please provide email, OTP, and new password', 400));
-  }
 
   const user = await User.findOne({
     email,
