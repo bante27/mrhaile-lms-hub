@@ -2,11 +2,13 @@ const mongoose = require('mongoose');
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const BaseService = require('../services/BaseService');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/appError');
 
 const conversationService = new BaseService(Conversation);
 const messageService = new BaseService(Message);
 
-const getConversations = async (req, res, next) => {
+const getConversations = catchAsync(async (req, res, next) => {
   try {
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
@@ -25,7 +27,6 @@ const getConversations = async (req, res, next) => {
         select: 'firstName lastName email profileImage phone isBlocked'
       });
 
-      // Sort by lastMessageAt descending
       conversations.sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
 
       if (search) {
@@ -69,11 +70,11 @@ const getConversations = async (req, res, next) => {
       });
     }
   } catch (error) {
-    next(error);
+    return next(new AppError(error.message, 500));
   }
-};
+});
 
-const getMessages = async (req, res, next) => {
+const getMessages = catchAsync(async (req, res, next) => {
   try {
     let { conversationId } = req.params;
     const { role, _id: userId } = req.user;
@@ -98,11 +99,11 @@ const getMessages = async (req, res, next) => {
     }
 
     if (!conversation) {
-      return res.status(404).json({ success: false, message: 'Conversation not found' });
+      return next(new AppError('Conversation not found', 404));
     }
 
     if (!isAdmin && conversation.userId.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized to access this conversation' });
+      return next(new AppError('Not authorized to access this conversation', 403));
     }
 
     const { data: messages, source } = await messageService.getAll({ conversationId: conversation._id }, 300, `messages-${conversation._id}`);
@@ -129,20 +130,16 @@ const getMessages = async (req, res, next) => {
       messages: formattedMessages
     });
   } catch (error) {
-    next(error);
+    return next(new AppError(error.message, 500));
   }
-};
+});
 
-const sendMessage = async (req, res, next) => {
+const sendMessage = catchAsync(async (req, res, next) => {
   try {
     let { conversationId } = req.params;
     const { text } = req.body;
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
-
-    if (!text || !text.trim()) {
-      return res.status(400).json({ success: false, message: 'Message text is required' });
-    }
 
     let conversation;
     if (conversationId === 'me' || !mongoose.isValidObjectId(conversationId)) {
@@ -173,7 +170,7 @@ const sendMessage = async (req, res, next) => {
     }
 
     if (!isAdmin && conversation.userId.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
+      return next(new AppError('Not authorized', 403));
     }
 
     const message = await messageService.create({
@@ -205,11 +202,11 @@ const sendMessage = async (req, res, next) => {
       message: populatedMessage
     });
   } catch (error) {
-    next(error);
+    return next(new AppError(error.message, 500));
   }
-};
+});
 
-const markMessageRead = async (req, res, next) => {
+const markMessageRead = catchAsync(async (req, res, next) => {
   try {
     const { messageId } = req.params;
     const { role, _id: userId } = req.user;
@@ -217,16 +214,16 @@ const markMessageRead = async (req, res, next) => {
 
     const { data: message } = await messageService.getById(messageId, 300);
     if (!message) {
-      return res.status(404).json({ success: false, message: 'Message not found' });
+      return next(new AppError('Message not found', 404));
     }
 
     const { data: conversation } = await conversationService.getById(message.conversationId, 300);
     if (!conversation) {
-      return res.status(404).json({ success: false, message: 'Conversation not found' });
+      return next(new AppError('Conversation not found', 404));
     }
 
     if (!isAdmin && conversation.userId.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
+      return next(new AppError('Not authorized', 403));
     }
 
     await messageService.update(messageId, { isRead: true });
@@ -241,11 +238,11 @@ const markMessageRead = async (req, res, next) => {
       message: 'Message marked as read'
     });
   } catch (error) {
-    next(error);
+    return next(new AppError(error.message, 500));
   }
-};
+});
 
-const markConversationRead = async (req, res, next) => {
+const markConversationRead = catchAsync(async (req, res, next) => {
   try {
     const { conversationId } = req.params;
     const { role, _id: userId } = req.user;
@@ -253,97 +250,78 @@ const markConversationRead = async (req, res, next) => {
 
     const { data: conversation } = await conversationService.getById(conversationId, 300);
     if (!conversation) {
-      return res.status(404).json({ success: false, message: 'Conversation not found' });
+      return next(new AppError('Conversation not found', 404));
     }
 
     if (!isAdmin && conversation.userId.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
+      return next(new AppError('Not authorized', 403));
     }
 
-    await Message.updateMany(
-      { conversationId, isRead: false, senderId: { $ne: userId } },
-      { $set: { isRead: true } }
-    );
-
-    await conversationService.update(conversationId, { unreadCount: 0 });
+    await messageService.updateMany({ conversationId: conversation._id, isRead: false }, { isRead: true });
+    await conversationService.update(conversation._id, { unreadCount: 0 });
 
     return res.status(200).json({
       success: true,
       message: 'Conversation marked as read'
     });
   } catch (error) {
-    next(error);
+    return next(new AppError(error.message, 500));
   }
-};
+});
 
-const deleteMessage = async (req, res, next) => {
+const deleteMessage = catchAsync(async (req, res, next) => {
   try {
     const { messageId } = req.params;
-    const { deleteType } = req.body;
     const { role, _id: userId } = req.user;
     const isAdmin = role === 'admin' || role === 'superadmin';
 
     const { data: message } = await messageService.getById(messageId, 300);
     if (!message) {
-      return res.status(404).json({ success: false, message: 'Message not found' });
+      return next(new AppError('Message not found', 404));
     }
 
-    const { data: conversation } = await conversationService.getById(message.conversationId, 300);
-    if (!conversation) {
-      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    if (!isAdmin && message.senderId.toString() !== userId.toString()) {
+      return next(new AppError('Not authorized to delete this message', 403));
     }
 
-    if (!isAdmin && conversation.userId.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, message: 'Not authorized' });
-    }
-
-    if (deleteType === 'everyone') {
-      if (message.senderId.toString() !== userId.toString() && !isAdmin) {
-        return res.status(403).json({ success: false, message: 'You can only delete your own messages for everyone' });
-      }
-    }
-
-    await messageService.update(messageId, {
-      deletedAt: new Date(),
-      deletedBy: userId,
-      text: 'This message was deleted'
-    });
+    await messageService.update(messageId, { deletedAt: new Date(), text: 'This message was deleted' });
 
     return res.status(200).json({
       success: true,
-      message: 'Message deleted successfully',
-      deletedMessageId: messageId,
-      conversationId: message.conversationId
+      message: 'Message deleted successfully'
     });
   } catch (error) {
-    next(error);
+    return next(new AppError(error.message, 500));
   }
-};
+});
 
-const updateConversationStatus = async (req, res, next) => {
+const updateConversationStatus = catchAsync(async (req, res, next) => {
   try {
     const { conversationId } = req.params;
     const { status } = req.body;
+    const { role } = req.user;
+    const isAdmin = role === 'admin' || role === 'superadmin';
 
-    if (!['active', 'closed', 'pending'].includes(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status value' });
+    if (!isAdmin) {
+      return next(new AppError('Not authorized', 403));
     }
 
     const { data: conversation } = await conversationService.getById(conversationId, 300);
     if (!conversation) {
-      return res.status(404).json({ success: false, message: 'Conversation not found' });
+      return next(new AppError('Conversation not found', 404));
     }
 
     const updated = await conversationService.update(conversationId, { status });
 
     return res.status(200).json({
       success: true,
+      message: 'Conversation status updated successfully',
       conversation: updated
     });
   } catch (error) {
-    next(error);
+    return next(new AppError(error.message, 500));
   }
-};
+});
 
 module.exports = {
   getConversations,
