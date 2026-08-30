@@ -4,18 +4,17 @@ const Review = require('../models/Review');
 const bunnyConfig = require('../config/bunny');
 const cloudinary = require('../config/cloudinary');
 const BaseService = require('../services/BaseService');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/appError');
 
-// Instantiate BaseService for Course
 const courseService = new BaseService(Course);
 
-// Helper to attach playable videoUrl (with Free Preview & Paid Lock/Pause logic) and exact dynamic stats
 const formatCourseWithStats = async (course, req) => {
   const courseObj = course.toObject ? course.toObject() : course;
 
   let isEnrolled = false;
   let isAdmin = false;
 
-  // Check if requesting user is logged in and enrolled or admin
   if (req && req.user) {
     try {
       const user = await User.findById(req.user._id);
@@ -23,12 +22,9 @@ const formatCourseWithStats = async (course, req) => {
         isAdmin = user.role === 'admin';
         isEnrolled = user.enrolledCourses && user.enrolledCourses.map(id => id.toString()).includes(courseObj._id.toString());
       }
-    } catch (e) {
-      // ignore user lookup error
-    }
+    } catch (e) { }
   }
 
-  // Format lessons with YouTube or Bunny video URL (Lock/Pause if paid and user not enrolled/admin)
   if (courseObj.lessons && Array.isArray(courseObj.lessons)) {
     courseObj.lessons = courseObj.lessons.map(lesson => {
       const canAccess = lesson.freePreview || isEnrolled || isAdmin;
@@ -42,16 +38,14 @@ const formatCourseWithStats = async (course, req) => {
       }
       return {
         ...lesson,
-        videoUrl: playableUrl // Locked / Paused for unpaid users, or YouTube / Bunny URL
+        videoUrl: playableUrl
       };
     });
   }
 
-  // Exact Enrolled Students Count from Database
   const enrolledCount = await User.countDocuments({ enrolledCourses: courseObj._id });
   courseObj.enrolledStudentsCount = enrolledCount;
 
-  // Exact Ratings & Reviews from Database
   const reviews = await Review.find({ targetId: courseObj._id });
   courseObj.numReviews = reviews.length;
 
@@ -65,266 +59,216 @@ const formatCourseWithStats = async (course, req) => {
   return courseObj;
 };
 
-// @desc Get all courses with smart lock/pause access logic & pagination (12 per page)
-// @route GET /api/courses?page=1&limit=12
-const getCourses = async (req, res) => {
-  try {
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 12;
+const getCourses = catchAsync(async (req, res, next) => {
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 12;
 
-    // Use BaseService.getAll() which checks Redis cache first
-    const { data: courses, source } = await courseService.getAll({ page, limit }, 1800, `page-${page}-limit-${limit}`);
+  const { data: courses, source } = await courseService.getAll({ page, limit }, 1800, `page-${page}-limit-${limit}`);
 
-    const total = await Course.countDocuments({});
-    const formattedCourses = await Promise.all(courses.map(c => formatCourseWithStats(c, req)));
+  const total = await Course.countDocuments({});
+  const formattedCourses = await Promise.all(courses.map(c => formatCourseWithStats(c, req)));
 
-    res.json({
-      source, // 'cache' or 'database'
-      courses: formattedCourses,
-      page,
-      pages: Math.ceil(total / limit),
-      total
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  res.json({
+    source,
+    courses: formattedCourses,
+    page,
+    pages: Math.ceil(total / limit),
+    total
+  });
+});
+
+const getCourseById = catchAsync(async (req, res, next) => {
+  const { data: course, source } = await courseService.getById(req.params.id, 3600);
+
+  if (!course) {
+    return next(new AppError('Course not found', 404));
   }
-};
 
-// @desc Get single course by ID with smart lock/pause access logic
-// @route GET /api/courses/:id
-const getCourseById = async (req, res) => {
-  try {
-    // Use BaseService.getById() which checks Redis cache first
-    const { data: course, source } = await courseService.getById(req.params.id, 3600);
+  const formatted = await formatCourseWithStats(course, req);
+  res.json({ source, ...formatted });
+});
 
-    if (course) {
-      const formatted = await formatCourseWithStats(course, req);
-      res.json({ source, ...formatted });
-    } else {
-      res.status(404).json({ message: 'Course not found' });
+const createCourse = catchAsync(async (req, res, next) => {
+  const { title, description, price, instructor, category } = req.body;
+  let thumbnail = req.body.thumbnail || '';
+  let lessons = [];
+
+  if (req.body.lessons) {
+    try {
+      lessons = typeof req.body.lessons === 'string'
+        ? JSON.parse(req.body.lessons)
+        : req.body.lessons;
+    } catch (e) {
+      lessons = [];
     }
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  } else {
+    const lessonMap = {};
+    for (const key in req.body) {
+      const match = key.match(/^lessons\[(\d+)\]\[(\w+)\]$/);
+      if (match) {
+        const index = match[1];
+        const field = match[2];
+        if (!lessonMap[index]) lessonMap[index] = {};
+        lessonMap[index][field] = req.body[key];
+      }
+    }
+    lessons = Object.values(lessonMap);
   }
-};
 
-// @desc Create a course with real video uploads to Bunny.net Stream (Admin)
-// @route POST /api/courses
-const createCourse = async (req, res) => {
-  try {
-    const { title, description, price, instructor, category } = req.body;
-    let thumbnail = req.body.thumbnail || '';
-    let lessons = [];
-
-    // Parse lessons from JSON string or individual form-data fields (e.g. lessons[0][title])
-    if (req.body.lessons) {
+  if (req.files && Array.isArray(req.files)) {
+    const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
+    if (thumbnailFile && thumbnailFile.buffer) {
       try {
-        lessons = typeof req.body.lessons === 'string'
-          ? JSON.parse(req.body.lessons)
-          : req.body.lessons;
-      } catch (e) {
-        lessons = [];
-      }
-    } else {
-      const lessonMap = {};
-      for (const key in req.body) {
-        const match = key.match(/^lessons\[(\d+)\]\[(\w+)\]$/);
-        if (match) {
-          const index = match[1];
-          const field = match[2];
-          if (!lessonMap[index]) lessonMap[index] = {};
-          lessonMap[index][field] = req.body[key];
+        const uploadResult = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            { folder: 'mrhaile_courses' },
+            (error, result) => {
+              if (error) return reject(error);
+              resolve(result);
+            }
+          );
+          uploadStream.end(thumbnailFile.buffer);
+        });
+        if (uploadResult && uploadResult.secure_url) {
+          thumbnail = uploadResult.secure_url;
         }
-      }
-      lessons = Object.values(lessonMap);
+      } catch (err) { }
     }
 
-    // Handle course thumbnail image upload to Cloudinary if file is attached
-    if (req.files && Array.isArray(req.files)) {
-      const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
-      if (thumbnailFile && thumbnailFile.buffer) {
+    const videoFiles = req.files.filter(f => f.fieldname !== 'thumbnail');
+    for (let i = 0; i < lessons.length && i < videoFiles.length; i++) {
+      const matchedFile = videoFiles[i];
+      if (matchedFile && matchedFile.buffer) {
         try {
-          const uploadResult = await new Promise((resolve, reject) => {
-            const uploadStream = cloudinary.uploader.upload_stream(
-              { folder: 'mrhaile_courses' },
-              (error, result) => {
-                if (error) return reject(error);
-                resolve(result);
-              }
-            );
-            uploadStream.end(thumbnailFile.buffer);
-          });
-          if (uploadResult && uploadResult.secure_url) {
-            thumbnail = uploadResult.secure_url;
-          }
-        } catch (err) {
-          // Ignore thumbnail upload error or fallback
-        }
-      }
-
-      // Handle real video uploads for lessons sequentially from any attached video files
-      const videoFiles = req.files.filter(f => f.fieldname !== 'thumbnail');
-      for (let i = 0; i < lessons.length && i < videoFiles.length; i++) {
-        const matchedFile = videoFiles[i];
-        if (matchedFile && matchedFile.buffer) {
-          try {
-            const bunnyVideoId = await bunnyConfig.uploadVideo(lessons[i].title, matchedFile.buffer);
-            lessons[i].bunnyVideoId = bunnyVideoId;
-          } catch (uploadErr) {
-            console.error(`[Course Create] Bunny video upload failed for lesson ${i}:`, uploadErr.message);
-          }
-        }
+          const bunnyVideoId = await bunnyConfig.uploadVideo(lessons[i].title, matchedFile.buffer);
+          lessons[i].bunnyVideoId = bunnyVideoId;
+        } catch (uploadErr) { }
       }
     }
-
-    const courseData = {
-      title,
-      description,
-      price: Number(price) || 0,
-      instructor,
-      thumbnail,
-      category,
-      lessons: lessons.map(l => ({
-        title: l.title,
-        bunnyVideoId: l.bunnyVideoId || '',
-        youtubeUrl: l.youtubeUrl || '',
-        duration: l.duration || '0:00',
-        freePreview: l.freePreview === true || l.freePreview === 'true'
-      }))
-    };
-
-    // Use BaseService.create() which saves to DB and automatically invalidates Redis list cache
-    const createdCourse = await courseService.create(courseData);
-    const formatted = await formatCourseWithStats(createdCourse, req);
-    res.status(201).json(formatted);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
-};
 
-// @desc Get secure Bunny Stream video URL/Token for a course lesson
-// @route GET /api/courses/:id/lessons/:lessonId/video
-const getLessonVideoToken = async (req, res) => {
-  try {
-    const { id: courseId, lessonId } = req.params;
+  const courseData = {
+    title,
+    description,
+    price: Number(price) || 0,
+    instructor,
+    thumbnail,
+    category,
+    lessons: lessons.map(l => ({
+      title: l.title,
+      bunnyVideoId: l.bunnyVideoId || '',
+      youtubeUrl: l.youtubeUrl || '',
+      duration: l.duration || '0:00',
+      freePreview: l.freePreview === true || l.freePreview === 'true'
+    }))
+  };
 
-    // Use BaseService.getById() for cached course lookup
-    const { data: course } = await courseService.getById(courseId, 3600);
+  const createdCourse = await courseService.create(courseData);
+  const formatted = await formatCourseWithStats(createdCourse, req);
+  res.status(201).json(formatted);
+});
 
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
+const getLessonVideoToken = catchAsync(async (req, res, next) => {
+  const { id: courseId, lessonId } = req.params;
 
-    const lesson = course.lessons.id ? course.lessons.id(lessonId) : course.lessons.find(l => l._id.toString() === lessonId);
-    if (!lesson) {
-      return res.status(404).json({ message: 'Lesson not found' });
-    }
+  const { data: course } = await courseService.getById(courseId, 3600);
 
-    // Check if lesson is free preview or if user is enrolled/admin
-    if (!lesson.freePreview) {
-      if (!req.user) {
-        return res.status(401).json({ message: 'Not authorized, please login' });
-      }
-
-      const user = await User.findById(req.user._id);
-
-      const enrolledIds = user.enrolledCourses ? user.enrolledCourses.map(id => id.toString()) : [];
-      const isEnrolled = enrolledIds.includes(courseId.toString());
-      const isAdmin = user.role === 'admin';
-
-      if (!isEnrolled && !isAdmin) {
-        return res.status(403).json({ message: 'Access denied. You must purchase or enroll in this course to view this video.' });
-      }
-    }
-
-    let secureVideoUrl = '';
-    if (lesson.youtubeUrl && lesson.youtubeUrl.trim() !== '') {
-      secureVideoUrl = lesson.youtubeUrl;
-    } else if (lesson.bunnyVideoId && lesson.bunnyVideoId.trim() !== '') {
-      secureVideoUrl = bunnyConfig.generateEmbedUrl(lesson.bunnyVideoId, 7200); // valid for 2 hours
-    }
-
-    res.json({
-      title: lesson.title,
-      videoUrl: secureVideoUrl,
-      duration: lesson.duration,
-      freePreview: lesson.freePreview
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  if (!course) {
+    return next(new AppError('Course not found', 404));
   }
-};
 
-// @desc Delete a course by ID (Admin)
-// @route DELETE /api/courses/:id
-const deleteCourse = async (req, res) => {
-  try {
-    // Use BaseService.delete() which deletes from DB and purges Redis cache
-    const course = await courseService.delete(req.params.id);
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-
-    res.json({ message: 'Course removed successfully' });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+  const lesson = course.lessons.id ? course.lessons.id(lessonId) : course.lessons.find(l => l._id.toString() === lessonId);
+  if (!lesson) {
+    return next(new AppError('Lesson not found', 404));
   }
-};
 
-// @desc Update a course by ID (Admin)
-// @route PUT /api/courses/:id
-const updateCourse = async (req, res) => {
-  try {
-    const { data: existingCourse } = await courseService.getById(req.params.id, 3600);
-    if (!existingCourse) {
-      return res.status(404).json({ message: 'Course not found' });
+  if (!lesson.freePreview) {
+    if (!req.user) {
+      return next(new AppError('Not authorized, please login', 401));
     }
 
-    const { title, description, price, instructor, category } = req.body;
-    const updateData = {};
+    const user = await User.findById(req.user._id);
 
-    if (title) updateData.title = title;
-    if (description) updateData.description = description;
-    if (price !== undefined) updateData.price = Number(price);
-    if (instructor) updateData.instructor = instructor;
-    if (category) updateData.category = category;
+    const enrolledIds = user.enrolledCourses ? user.enrolledCourses.map(id => id.toString()) : [];
+    const isEnrolled = enrolledIds.includes(courseId.toString());
+    const isAdmin = user.role === 'admin';
 
-    if (req.body.lessons) {
+    if (!isEnrolled && !isAdmin) {
+      return next(new AppError('Access denied. You must purchase or enroll in this course to view this video.', 403));
+    }
+  }
+
+  let secureVideoUrl = '';
+  if (lesson.youtubeUrl && lesson.youtubeUrl.trim() !== '') {
+    secureVideoUrl = lesson.youtubeUrl;
+  } else if (lesson.bunnyVideoId && lesson.bunnyVideoId.trim() !== '') {
+    secureVideoUrl = bunnyConfig.generateEmbedUrl(lesson.bunnyVideoId, 7200);
+  }
+
+  res.json({
+    title: lesson.title,
+    videoUrl: secureVideoUrl,
+    duration: lesson.duration,
+    freePreview: lesson.freePreview
+  });
+});
+
+const deleteCourse = catchAsync(async (req, res, next) => {
+  const course = await courseService.delete(req.params.id);
+  if (!course) {
+    return next(new AppError('Course not found', 404));
+  }
+
+  res.json({ message: 'Course removed successfully' });
+});
+
+const updateCourse = catchAsync(async (req, res, next) => {
+  const { data: existingCourse } = await courseService.getById(req.params.id, 3600);
+  if (!existingCourse) {
+    return next(new AppError('Course not found', 404));
+  }
+
+  const { title, description, price, instructor, category } = req.body;
+  const updateData = {};
+
+  if (title) updateData.title = title;
+  if (description) updateData.description = description;
+  if (price !== undefined) updateData.price = Number(price);
+  if (instructor) updateData.instructor = instructor;
+  if (category) updateData.category = category;
+
+  if (req.body.lessons) {
+    try {
+      updateData.lessons = typeof req.body.lessons === 'string'
+        ? JSON.parse(req.body.lessons)
+        : req.body.lessons;
+    } catch (e) { }
+  }
+
+  if (req.files && Array.isArray(req.files)) {
+    const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
+    if (thumbnailFile && thumbnailFile.buffer) {
       try {
-        updateData.lessons = typeof req.body.lessons === 'string'
-          ? JSON.parse(req.body.lessons)
-          : req.body.lessons;
-      } catch (e) { }
+        const uploadResult = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            { folder: 'mrhaile_courses' },
+            (error, result) => {
+              if (error) return reject(error);
+              resolve(result);
+            }
+          );
+          uploadStream.end(thumbnailFile.buffer);
+        });
+        if (uploadResult && uploadResult.secure_url) {
+          updateData.thumbnail = uploadResult.secure_url;
+        }
+      } catch (err) { }
     }
-
-    if (req.files && Array.isArray(req.files)) {
-      const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
-      if (thumbnailFile && thumbnailFile.buffer) {
-        try {
-          const uploadResult = await new Promise((resolve, reject) => {
-            const uploadStream = cloudinary.uploader.upload_stream(
-              { folder: 'mrhaile_courses' },
-              (error, result) => {
-                if (error) return reject(error);
-                resolve(result);
-              }
-            );
-            uploadStream.end(thumbnailFile.buffer);
-          });
-          if (uploadResult && uploadResult.secure_url) {
-            updateData.thumbnail = uploadResult.secure_url;
-          }
-        } catch (err) { }
-      }
-    }
-
-    // Use BaseService.update() which updates DB and clears Redis cache for this course & lists
-    const updatedCourse = await courseService.update(req.params.id, updateData);
-    const formatted = await formatCourseWithStats(updatedCourse, req);
-    res.json(formatted);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
   }
-};
+
+  const updatedCourse = await courseService.update(req.params.id, updateData);
+  const formatted = await formatCourseWithStats(updatedCourse, req);
+  res.json(formatted);
+});
 
 module.exports = { getCourses, getCourseById, createCourse, updateCourse, deleteCourse, getLessonVideoToken };
