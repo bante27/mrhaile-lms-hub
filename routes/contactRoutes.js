@@ -2,9 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { submitContactMessage, getContactMessages } = require('../controllers/contactController');
 const { protect, admin } = require('../middleware/authMiddleware');
+const validate = require('../middleware/validateMiddleware');
+const { contactSchema } = require('../validation/contactValidation');
 
 router.route('/')
-  .post(submitContactMessage)
+  .post(validate(contactSchema), submitContactMessage)
   .get(protect, admin, getContactMessages);
 
 module.exports = router;
+
