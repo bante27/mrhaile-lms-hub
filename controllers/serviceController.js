@@ -1,6 +1,8 @@
 const ServiceInquiry = require('../models/ServiceInquiry');
 const sendEmail = require('../utils/sendEmail');
 const BaseService = require('../services/BaseService');
+const catchAsync = require('../utils/catchAsync');
+const AppError = require('../utils/appError');
 
 const serviceInquiryService = new BaseService(ServiceInquiry);
 
@@ -46,191 +48,157 @@ const generateSmartEmailHtml = ({ heading, subtitle, contentHtml, callToAction }
   `;
 };
 
-const submitInquiry = async (req, res) => {
+const submitInquiry = catchAsync(async (req, res, next) => {
+  const { name, email, phone, serviceType, budget, message } = req.body;
+
+  const inquiry = await serviceInquiryService.create({
+    name,
+    email,
+    phone: phone || '',
+    serviceType,
+    budget: budget || '',
+    message
+  });
+
   try {
-    const { name, email, phone, serviceType, budget, message } = req.body;
-
-    if (!name || !email || !serviceType || !message) {
-      return res.status(400).json({ message: 'Please fill in all required fields (Name, Email, Service Type, Project Details)' });
-    }
-
-    const inquiry = await serviceInquiryService.create({
-      name,
-      email,
-      phone: phone || '',
-      serviceType,
-      budget: budget || '',
-      message
-    });
-
-    try {
-      const adminEmail = process.env.MAIL_USERNAME || process.env.ADMIN_EMAIL || 'admin@mrhaile.com';
-      const adminHtml = generateSmartEmailHtml({
-        heading: 'New Custom Editing Quote Request',
-        subtitle: 'New Client Inquiry Received',
-        contentHtml: `
-          <p>Hello Admin,</p>
-          <p>You have received a new custom editing quote request from <strong>${name}</strong>.</p>
-          <div class="highlight-box">
-            <strong>Client Name:</strong> ${name}<br>
-            <strong>Email:</strong> ${email}<br>
-            <strong>Phone:</strong> ${phone || 'N/A'}<br>
-            <strong>Service Type:</strong> ${serviceType}<br>
-            <strong>Estimated Budget:</strong> ${budget || 'N/A'}
-          </div>
-          <p><strong>Project Details & Footage Link:</strong></p>
-          <p style="white-space: pre-wrap; background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0;">${message}</p>
-        `,
-        callToAction: {
-          url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/admin/inquiries`,
-          text: 'View Inquiries Dashboard'
-        }
-      });
-
-      await sendEmail({
-        email: adminEmail,
-        subject: `New Custom Editing Quote Request: ${serviceType} from ${name}`,
-        message: `You have received a new custom editing quote request.\n\nName: ${name}\nEmail: ${email}\nPhone: ${phone || 'N/A'}\nService Type: ${serviceType}\nEstimated Budget: ${budget || 'N/A'}\n\nProject Details & Footage Link:\n${message}`,
-        html: adminHtml
-      });
-    } catch (emailErr) { }
-
-    try {
-      const clientHtml = generateSmartEmailHtml({
-        heading: 'We Have Received Your Quote Request!',
-        subtitle: 'Thank you for choosing MrHaile Hub',
-        contentHtml: `
-          <p>Hello <strong>${name}</strong>,</p>
-          <p>Thank you for reaching out to MrHaile Hub for your <strong>${serviceType}</strong> project!</p>
-          <p>Our production team is currently reviewing your project details and estimated budget. We will get back to you within 24 hours with a custom quote and next steps.</p>
-          <div class="highlight-box">
-            <strong>Summary of your inquiry:</strong><br>
-            - Service: ${serviceType}<br>
-            - Budget: ${budget || 'Flexible / Not specified'}<br>
-            - Status: Pending Review
-          </div>
-          <p>If you have any additional footage links or reference files to share in the meantime, feel free to reply directly to this email.</p>
-        `,
-        callToAction: {
-          url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/services`,
-          text: 'Explore Our Services'
-        }
-      });
-
-      await sendEmail({
-        email: email,
-        subject: `We've received your inquiry: ${serviceType} - MrHaile Hub`,
-        message: `Hello ${name},\n\nThank you for reaching out to MrHaile Hub for your ${serviceType} project! We have received your inquiry and will get back to you within 24 hours.\n\nBest regards,\nMrHaile Hub Team`,
-        html: clientHtml
-      });
-    } catch (clientEmailErr) { }
-
-    res.status(201).json({ message: 'Quote request submitted successfully', inquiry });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-const getInquiries = async (req, res) => {
-  try {
-    const { data: inquiries, source } = await serviceInquiryService.getAll({}, 600, 'all-inquiries');
-    const sorted = [...inquiries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    res.json({ source, inquiries: sorted });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-const replyInquiry = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { replyMessage, status } = req.body;
-
-    if (!replyMessage) {
-      return res.status(400).json({ message: 'Please provide a reply message' });
-    }
-
-    const { data: inquiryObj } = await serviceInquiryService.getById(id, 600);
-    if (!inquiryObj) {
-      return res.status(404).json({ message: 'Service inquiry not found' });
-    }
-
-    const updateData = {
-      adminReply: replyMessage,
-      repliedAt: Date.now(),
-      status: status || 'contacted'
-    };
-
-    const updatedInquiry = await serviceInquiryService.update(id, updateData);
-
-    const clientReplyHtml = generateSmartEmailHtml({
-      heading: `Update on Your Inquiry: ${updatedInquiry.serviceType}`,
-      subtitle: 'Response from MrHaile Hub Team',
+    const adminEmail = process.env.MAIL_USERNAME || process.env.ADMIN_EMAIL || 'admin@mrhaile.com';
+    const adminHtml = generateSmartEmailHtml({
+      heading: 'New Custom Editing Quote Request',
+      subtitle: 'New Client Inquiry Received',
       contentHtml: `
-        <p>Hello <strong>${updatedInquiry.name}</strong>,</p>
-        <p>We have an update regarding your custom editing quote request for <strong>${updatedInquiry.serviceType}</strong>:</p>
-        <div class="highlight-box" style="border-left-color: #0284c7; background: #f0f9ff;">
-          <strong>Admin Response:</strong><br><br>
-          <span style="white-space: pre-wrap; color: #0f172a;">${replyMessage}</span>
+        <p>Hello Admin,</p>
+        <p>You have received a new custom editing quote request from <strong>${name}</strong>.</p>
+        <div class="highlight-box">
+          <strong>Client Name:</strong> ${name}<br>
+          <strong>Email:</strong> ${email}<br>
+          <strong>Phone:</strong> ${phone || 'N/A'}<br>
+          <strong>Service Type:</strong> ${serviceType}<br>
+          <strong>Estimated Budget:</strong> ${budget || 'N/A'}
         </div>
-        <p>If you have any questions or would like to proceed with the project proposal, please reply to this email or contact us directly.</p>
+        <p><strong>Project Details & Footage Link:</strong></p>
+        <p style="white-space: pre-wrap; background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e2e8f0;">${message}</p>
       `,
       callToAction: {
-        url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/contact`,
-        text: 'Contact Us'
+        url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/admin/inquiries`,
+        text: 'View Inquiries Dashboard'
       }
     });
 
-    try {
-      await sendEmail({
-        email: updatedInquiry.email,
-        subject: `Response regarding your quote request (${updatedInquiry.serviceType}) - MrHaile Hub`,
-        message: `Hello ${updatedInquiry.name},\n\nWe have an update regarding your quote request for ${updatedInquiry.serviceType}:\n\n${replyMessage}\n\nBest regards,\nMrHaile Hub Team`,
-        html: clientReplyHtml
-      });
-    } catch (emailError) {
-      return res.status(500).json({
-        message: `Inquiry saved, but failed to send email to client: ${emailError.message}`,
-        inquiry: updatedInquiry
-      });
-    }
-
-    res.json({
-      message: 'Reply sent successfully to client email',
-      inquiry: updatedInquiry
+    await sendEmail({
+      email: adminEmail,
+      subject: `New Custom Editing Quote Request: ${serviceType} from ${name}`,
+      message: `You have received a new custom editing quote request.\n\nName: ${name}\nEmail: ${email}\nPhone: ${phone || 'N/A'}\nService Type: ${serviceType}\nEstimated Budget: ${budget || 'N/A'}\n\nProject Details & Footage Link:\n${message}`,
+      html: adminHtml
     });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+  } catch (emailErr) { }
 
-const getInquiryById = async (req, res) => {
   try {
-    const { data: inquiry, source } = await serviceInquiryService.getById(req.params.id, 600);
-    if (!inquiry) {
-      return res.status(404).json({ message: 'Service inquiry not found' });
-    }
-    res.json({ source, ...inquiry.toObject ? inquiry.toObject() : inquiry });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+    const clientHtml = generateSmartEmailHtml({
+      heading: 'We Have Received Your Quote Request!',
+      subtitle: 'Thank you for choosing MrHaile Hub',
+      contentHtml: `
+        <p>Hello <strong>${name}</strong>,</p>
+        <p>Thank you for reaching out to MrHaile Hub for your <strong>${serviceType}</strong> project!</p>
+        <p>Our production team is currently reviewing your project details and estimated budget. We will get back to you within 24 hours with a custom quote and next steps.</p>
+        <div class="highlight-box">
+          <strong>Summary of your inquiry:</strong><br>
+          - Service: ${serviceType}<br>
+          - Budget: ${budget || 'Flexible / Not specified'}<br>
+          - Status: Pending Review
+        </div>
+        <p>If you have any additional footage links or reference files to share in the meantime, feel free to reply directly to this email.</p>
+      `,
+      callToAction: {
+        url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/services`,
+        text: 'Explore Our Services'
+      }
+    });
 
-const getMyInquiries = async (req, res) => {
-  try {
-    const { data: inquiries, source } = await serviceInquiryService.getAll({ user: req.user._id }, 600, `my-inquiries-${req.user._id}`);
-    const sorted = [...inquiries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    res.status(200).json({
-      success: true,
-      source,
-      inquiries: sorted
+    await sendEmail({
+      email: email,
+      subject: `We've received your inquiry: ${serviceType} - MrHaile Hub`,
+      message: `Hello ${name},\n\nThank you for reaching out to MrHaile Hub for your ${serviceType} project! We have received your inquiry and will get back to you within 24 hours.\n\nBest regards,\nMrHaile Hub Team`,
+      html: clientHtml
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+  } catch (clientEmailErr) { }
+
+  res.status(201).json({ message: 'Quote request submitted successfully', inquiry });
+});
+
+const getInquiries = catchAsync(async (req, res, next) => {
+  const { data: inquiries, source } = await serviceInquiryService.getAll({}, 600, 'all-inquiries');
+  const sorted = [...inquiries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ source, inquiries: sorted });
+});
+
+const replyInquiry = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { replyMessage, status } = req.body;
+
+  const { data: inquiryObj } = await serviceInquiryService.getById(id, 600);
+  if (!inquiryObj) {
+    return next(new AppError('Service inquiry not found', 404));
   }
-};
+
+  const updateData = {
+    adminReply: replyMessage,
+    repliedAt: Date.now(),
+    status: status || 'contacted'
+  };
+
+  const updatedInquiry = await serviceInquiryService.update(id, updateData);
+
+  const clientReplyHtml = generateSmartEmailHtml({
+    heading: `Update on Your Inquiry: ${updatedInquiry.serviceType}`,
+    subtitle: 'Response from MrHaile Hub Team',
+    contentHtml: `
+      <p>Hello <strong>${updatedInquiry.name}</strong>,</p>
+      <p>We have an update regarding your custom editing quote request for <strong>${updatedInquiry.serviceType}</strong>:</p>
+      <div class="highlight-box" style="border-left-color: #0284c7; background: #f0f9ff;">
+        <strong>Admin Response:</strong><br><br>
+        <span style="white-space: pre-wrap; color: #0f172a;">${replyMessage}</span>
+      </div>
+      <p>If you have any questions or would like to proceed with the project proposal, please reply to this email or contact us directly.</p>
+    `,
+    callToAction: {
+      url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/contact`,
+      text: 'Contact Us'
+    }
+  });
+
+  try {
+    await sendEmail({
+      email: updatedInquiry.email,
+      subject: `Response regarding your quote request (${updatedInquiry.serviceType}) - MrHaile Hub`,
+      message: `Hello ${updatedInquiry.name},\n\nWe have an update regarding your quote request for ${updatedInquiry.serviceType}:\n\n${replyMessage}\n\nBest regards,\nMrHaile Hub Team`,
+      html: clientReplyHtml
+    });
+  } catch (emailError) {
+    return next(new AppError(`Inquiry saved, but failed to send email to client: ${emailError.message}`, 500));
+  }
+
+  res.json({
+    message: 'Reply sent successfully to client email',
+    inquiry: updatedInquiry
+  });
+});
+
+const getInquiryById = catchAsync(async (req, res, next) => {
+  const { data: inquiry, source } = await serviceInquiryService.getById(req.params.id, 600);
+  if (!inquiry) {
+    return next(new AppError('Service inquiry not found', 404));
+  }
+  res.json({ source, ...inquiry.toObject ? inquiry.toObject() : inquiry });
+});
+
+const getMyInquiries = catchAsync(async (req, res, next) => {
+  const { data: inquiries, source } = await serviceInquiryService.getAll({ user: req.user._id }, 600, `my-inquiries-${req.user._id}`);
+  const sorted = [...inquiries].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.status(200).json({
+    success: true,
+    source,
+    inquiries: sorted
+  });
+});
 
 module.exports = { submitInquiry, getInquiries, getInquiryById, getMyInquiries, replyInquiry };
