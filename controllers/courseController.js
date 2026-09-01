@@ -114,31 +114,27 @@ const createCourse = catchAsync(async (req, res, next) => {
   if (req.files && Array.isArray(req.files)) {
     const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
     if (thumbnailFile && thumbnailFile.buffer) {
-      try {
-        const uploadResult = await new Promise((resolve, reject) => {
-          const uploadStream = cloudinary.uploader.upload_stream(
-            { folder: 'mrhaile_courses' },
-            (error, result) => {
-              if (error) return reject(error);
-              resolve(result);
-            }
-          );
-          uploadStream.end(thumbnailFile.buffer);
-        });
-        if (uploadResult && uploadResult.secure_url) {
-          thumbnail = uploadResult.secure_url;
-        }
-      } catch (err) { }
+      const uploadResult = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          { folder: 'mrhaile_courses' },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        );
+        uploadStream.end(thumbnailFile.buffer);
+      });
+      if (uploadResult && uploadResult.secure_url) {
+        thumbnail = uploadResult.secure_url;
+      }
     }
 
     const videoFiles = req.files.filter(f => f.fieldname !== 'thumbnail');
     for (let i = 0; i < lessons.length && i < videoFiles.length; i++) {
       const matchedFile = videoFiles[i];
       if (matchedFile && matchedFile.buffer) {
-        try {
-          const bunnyVideoId = await bunnyConfig.uploadVideo(lessons[i].title, matchedFile.buffer);
-          lessons[i].bunnyVideoId = bunnyVideoId;
-        } catch (uploadErr) { }
+        const bunnyVideoId = await bunnyConfig.uploadVideo(lessons[i].title, matchedFile.buffer);
+        lessons[i].bunnyVideoId = bunnyVideoId;
       }
     }
   }
@@ -234,31 +230,27 @@ const updateCourse = catchAsync(async (req, res, next) => {
   if (category) updateData.category = category;
 
   if (req.body.lessons) {
-    try {
-      updateData.lessons = typeof req.body.lessons === 'string'
-        ? JSON.parse(req.body.lessons)
-        : req.body.lessons;
-    } catch (e) { }
+    updateData.lessons = typeof req.body.lessons === 'string'
+      ? JSON.parse(req.body.lessons)
+      : req.body.lessons;
   }
 
   if (req.files && Array.isArray(req.files)) {
     const thumbnailFile = req.files.find(f => f.fieldname === 'thumbnail');
     if (thumbnailFile && thumbnailFile.buffer) {
-      try {
-        const uploadResult = await new Promise((resolve, reject) => {
-          const uploadStream = cloudinary.uploader.upload_stream(
-            { folder: 'mrhaile_courses' },
-            (error, result) => {
-              if (error) return reject(error);
-              resolve(result);
-            }
-          );
-          uploadStream.end(thumbnailFile.buffer);
-        });
-        if (uploadResult && uploadResult.secure_url) {
-          updateData.thumbnail = uploadResult.secure_url;
-        }
-      } catch (err) { }
+      const uploadResult = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          { folder: 'mrhaile_courses' },
+          (error, result) => {
+            if (error) return reject(error);
+            resolve(result);
+          }
+        );
+        uploadStream.end(thumbnailFile.buffer);
+      });
+      if (uploadResult && uploadResult.secure_url) {
+        updateData.thumbnail = uploadResult.secure_url;
+      }
     }
   }
 
