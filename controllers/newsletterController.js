@@ -16,13 +16,11 @@ const subscribeNewsletter = catchAsync(async (req, res, next) => {
 
   const subscriber = await newsletterService.create({ email });
 
-  try {
-    await sendEmail({
-      email,
-      subject: 'Welcome to MrHaile.com Newsletter!',
-      message: `Hello,\n\nThank you for subscribing to MrHaile.com! You will now receive weekly stock footage drops, free presets, and video editing masterclass tips directly in your inbox.\n\nStay tuned for our latest updates!\n\nBest regards,\nMrHaile.com Team`
-    });
-  } catch (emailErr) { }
+  await sendEmail({
+    email,
+    subject: 'Welcome to MrHaile.com Newsletter!',
+    message: `Hello,\n\nThank you for subscribing to MrHaile.com! You will now receive weekly stock footage drops, free presets, and video editing masterclass tips directly in your inbox.\n\nStay tuned for our latest updates!\n\nBest regards,\nMrHaile.com Team`
+  });
 
   res.status(201).json({ message: 'Subscribed successfully! Check your email for updates.', subscriber });
 });
@@ -37,14 +35,12 @@ const broadcastNewsletter = catchAsync(async (req, res, next) => {
 
   let successCount = 0;
   for (const sub of subscribers) {
-    try {
-      await sendEmail({
-        email: sub.email,
-        subject,
-        message: `${message}\n\n---\nYou are receiving this email because you subscribed to MrHaile.com.`
-      });
-      successCount++;
-    } catch (err) { }
+    await sendEmail({
+      email: sub.email,
+      subject,
+      message: `${message}\n\n---\nYou are receiving this email because you subscribed to MrHaile.com.`
+    });
+    successCount++;
   }
 
   res.json({ message: `Broadcast sent successfully to ${successCount} of ${subscribers.length} subscribers!` });
