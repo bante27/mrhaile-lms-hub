@@ -94,13 +94,9 @@ const createCourse = catchAsync(async (req, res, next) => {
   let lessons = [];
 
   if (req.body.lessons) {
-    try {
-      lessons = typeof req.body.lessons === 'string'
-        ? JSON.parse(req.body.lessons)
-        : req.body.lessons;
-    } catch (e) {
-      lessons = [];
-    }
+    lessons = typeof req.body.lessons === 'string'
+      ? JSON.parse(req.body.lessons)
+      : req.body.lessons;
   } else {
     const lessonMap = {};
     for (const key in req.body) {
