@@ -168,19 +168,13 @@ const verifyPayment = catchAsync(async (req, res, next) => {
   if (req.body.mock === true || req.query.mock === 'true' || req.path.includes('simulate-success') || process.env.NODE_ENV === 'development') {
     isSuccess = true;
   } else {
-    try {
-      const verification = await verifyChapaPayment(tx_ref);
-      isSuccess =
-        verification &&
-        (verification.status === 'success' ||
-          verification.status === 'successful' ||
-          verification.data?.status === 'success' ||
-          verification.data?.status === 'successful');
-    } catch (verifyErr) {
-      if (!process.env.CHAPA_SECRET_KEY) {
-        isSuccess = true;
-      }
-    }
+    const verification = await verifyChapaPayment(tx_ref);
+    isSuccess =
+      verification &&
+      (verification.status === 'success' ||
+        verification.status === 'successful' ||
+        verification.data?.status === 'success' ||
+        verification.data?.status === 'successful');
   }
 
   if (isSuccess) {
@@ -191,22 +185,20 @@ const verifyPayment = catchAsync(async (req, res, next) => {
 
     const populatedOrder = await EditingOrder.findById(order._id).populate('user', 'name email');
 
-    try {
-      const adminEmail = process.env.MAIL_USERNAME || process.env.ADMIN_EMAIL || 'admin@mrhaile.com';
-      await sendEmail({
-        email: adminEmail,
-        subject: 'New Editing Project Payment Received',
-        message: `A user has successfully paid for the ${order.planTitle} editing plan.\n\n` +
-          `User Name: ${populatedOrder.user?.name || 'N/A'}\n` +
-          `User Email: ${populatedOrder.user?.email || 'N/A'}\n` +
-          `Selected Plan: ${order.planTitle}\n` +
-          `Plan Price: $${order.price}\n` +
-          `Payment Reference: ${order.tx_ref}\n` +
-          `Payment Status: paid\n` +
-          `Order Date: ${order.createdAt}\n` +
-          `Description/Notes: ${order.description || 'N/A'}`
-      });
-    } catch (emailErr) { }
+    const adminEmail = process.env.MAIL_USERNAME || process.env.ADMIN_EMAIL || 'admin@mrhaile.com';
+    await sendEmail({
+      email: adminEmail,
+      subject: 'New Editing Project Payment Received',
+      message: `A user has successfully paid for the ${order.planTitle} editing plan.\n\n` +
+        `User Name: ${populatedOrder.user?.name || 'N/A'}\n` +
+        `User Email: ${populatedOrder.user?.email || 'N/A'}\n` +
+        `Selected Plan: ${order.planTitle}\n` +
+        `Plan Price: $${order.price}\n` +
+        `Payment Reference: ${order.tx_ref}\n` +
+        `Payment Status: paid\n` +
+        `Order Date: ${order.createdAt}\n` +
+        `Description/Notes: ${order.description || 'N/A'}`
+    });
 
     return res.json({
       success: true,
